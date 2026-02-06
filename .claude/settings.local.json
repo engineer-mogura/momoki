@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(del \"c:\\\\develop\\\\docker-apps\\\\momoki\\\\infra\\\\docker\\\\api\\\\entrypoint.sh\")"
+    ]
+  }
+}
