@@ -22,6 +22,7 @@ class MenuCategoryController extends Controller
                 'id' => $category->id,
                 'name' => $category->name,
                 'description' => $category->description,
+                'theme' => $category->theme,
                 'items' => $category->availableMenuItems->map(fn($item) => [
                     'id' => $item->id,
                     'name' => $item->name,
@@ -49,6 +50,7 @@ class MenuCategoryController extends Controller
                 'id' => $menuCategory->id,
                 'name' => $menuCategory->name,
                 'description' => $menuCategory->description,
+                'theme' => $menuCategory->theme,
                 'items' => $menuCategory->availableMenuItems->map(fn($item) => [
                     'id' => $item->id,
                     'name' => $item->name,

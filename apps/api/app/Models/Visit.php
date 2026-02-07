@@ -11,10 +11,24 @@ class Visit extends Model
 {
     use HasFactory;
 
+    public const STATUS_SEATED = 'seated';
+    public const STATUS_SERVING = 'serving';
+    public const STATUS_CHECKOUT = 'checkout';
+    public const STATUS_DONE = 'done';
+
+    public const STATUSES = [
+        self::STATUS_SEATED,
+        self::STATUS_SERVING,
+        self::STATUS_CHECKOUT,
+        self::STATUS_DONE,
+    ];
+
     protected $fillable = [
         'user_id',
         'store_id',
+        'business_session_id',
         'table_number',
+        'status',
         'checked_in_at',
         'checked_out_at',
     ];
@@ -38,6 +52,14 @@ class Visit extends Model
     public function store(): BelongsTo
     {
         return $this->belongsTo(Store::class);
+    }
+
+    /**
+     * Get the business session for this visit
+     */
+    public function businessSession(): BelongsTo
+    {
+        return $this->belongsTo(BusinessSession::class);
     }
 
     /**

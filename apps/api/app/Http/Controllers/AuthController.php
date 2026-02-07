@@ -132,9 +132,11 @@ class AuthController extends Controller
             ]
         );
 
-        // Login user with explicit web guard (Sanctum SPA)
-        Auth::guard('web')->login($user);
-        $request->session()->regenerate();
+        // Revoke all existing tokens for this user (for security)
+        $user->tokens()->delete();
+
+        // Create a new Personal Access Token
+        $token = $user->createToken('web-app', ['*'])->plainTextToken;
 
         Log::info('lineCallback success', [
             'user_id' => $user->id,
@@ -148,17 +150,17 @@ class AuthController extends Controller
                 'picture_url' => $user->picture_url,
                 'is_admin' => $user->is_admin,
             ],
+            'token' => $token,
         ]);
     }
 
     /**
-     * Logout current user
+     * Logout current user (revoke current token)
      */
     public function logout(Request $request): JsonResponse
     {
-        Auth::guard('web')->logout();
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
+        // Revoke the current access token
+        $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'Logged out successfully']);
     }

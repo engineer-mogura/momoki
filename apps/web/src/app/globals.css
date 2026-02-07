@@ -3,18 +3,14 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-rgb: 255, 255, 255;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --foreground-rgb: 255, 255, 255;
-    --background-rgb: 15, 15, 15;
-  }
+  --bg: #f8fafc;         /* slate-50 */
+  --card: #ffffff;
+  --border: #e2e8f0;     /* slate-200 */
+  --text: #0f172a;       /* slate-900 */
+  --muted: #64748b;      /* slate-500 */
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: rgb(var(--background-rgb));
+  color: var(--text);
+  background: var(--bg);
 }

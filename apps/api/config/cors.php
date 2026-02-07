@@ -6,12 +6,13 @@ return [
     | Cross-Origin Resource Sharing (CORS) Configuration
     |--------------------------------------------------------------------------
     |
-    | 本番環境ではVercelのドメインのみ許可
-    | SameSite=None; Secure でクロスドメインCookieを有効化
+    | Bearer Token認証用のCORS設定
+    | Cookieは使わないので supports_credentials は false
+    | Authorization ヘッダーを許可
     |
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie', 'auth/*'],
+    'paths' => ['api/*', 'auth/*'],
 
     'allowed_methods' => ['*'],
 
@@ -25,5 +26,5 @@ return [
 
     'max_age' => 0,
 
-    'supports_credentials' => true,
+    'supports_credentials' => false,
 ];

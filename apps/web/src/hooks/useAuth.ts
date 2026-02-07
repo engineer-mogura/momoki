@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { api } from '@/lib/api';
+import { api, clearAuthToken } from '@/lib/api';
 import { User } from '@/types';
 
 interface AuthState {
@@ -33,9 +33,12 @@ export function useAuth() {
   const logout = useCallback(async () => {
     try {
       await api.post('/api/auth/logout');
-      setState({ user: null, isLoading: false, error: null });
     } catch (error) {
       console.error('Logout failed:', error);
+    } finally {
+      // Always clear token and user state
+      clearAuthToken();
+      setState({ user: null, isLoading: false, error: null });
     }
   }, []);
 

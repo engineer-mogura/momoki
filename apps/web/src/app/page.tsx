@@ -16,11 +16,11 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white">
+    <main className="min-h-screen bg-slate-50 text-slate-900">
       <div className="container mx-auto px-4 py-16">
         <div className="text-center">
           <h1 className="text-4xl font-bold mb-4">Momoki Bar</h1>
-          <p className="text-gray-400 mb-8">バーの注文管理アプリへようこそ</p>
+          <p className="text-slate-500 mb-8">バーの注文管理アプリへようこそ</p>
 
           {user ? (
             <div className="space-y-4">
@@ -36,14 +36,14 @@ export default function Home() {
                 </Link>
                 <Link
                   href="/orders"
-                  className="bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-6 rounded-lg transition"
+                  className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold py-3 px-6 rounded-lg transition"
                 >
                   注文履歴
                 </Link>
                 {user.is_admin && (
                   <Link
                     href="/admin"
-                    className="bg-gray-600 hover:bg-gray-500 text-white font-semibold py-3 px-6 rounded-lg transition"
+                    className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold py-3 px-6 rounded-lg transition"
                   >
                     管理画面へ
                   </Link>
@@ -52,7 +52,7 @@ export default function Home() {
             </div>
           ) : (
             <div className="space-y-4">
-              <p className="text-gray-400 mb-6">
+              <p className="text-slate-500 mb-6">
                 LINEでログインして注文を開始しましょう
               </p>
               <Link

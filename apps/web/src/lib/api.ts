@@ -4,6 +4,28 @@ interface FetchOptions extends RequestInit {
   params?: Record<string, string>;
 }
 
+/**
+ * Get authentication token from localStorage
+ */
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('auth_token');
+}
+
+/**
+ * Store authentication token in localStorage
+ */
+export function setAuthToken(token: string): void {
+  localStorage.setItem('auth_token', token);
+}
+
+/**
+ * Remove authentication token from localStorage
+ */
+export function clearAuthToken(): void {
+  localStorage.removeItem('auth_token');
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -20,13 +42,22 @@ class ApiClient {
       url += `?${searchParams.toString()}`;
     }
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    };
+
+    // Add Bearer token if available
+    const token = getAuthToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(url, {
       ...fetchOptions,
-      credentials: 'include',
       headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        ...fetchOptions.headers,
+        ...headers,
+        ...(fetchOptions.headers as Record<string, string>),
       },
     });
 

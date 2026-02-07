@@ -16,6 +16,7 @@ export interface MenuCategory {
   id: number;
   name: string;
   description: string | null;
+  theme: 'light' | 'dark';
   items: MenuItem[];
 }
 

@@ -8,21 +8,16 @@ return [
     | Stateful Domains
     |--------------------------------------------------------------------------
     |
-    | SPA認証を有効にするドメインを指定
-    | ローカル: localhost:3000
-    | 本番: Vercelのドメイン
+    | Bearer Token認証では stateful domains は不要
+    | 空配列にすることでCookie認証を無効化
     |
     */
 
-    'stateful' => explode(',', env('SANCTUM_STATEFUL_DOMAINS', sprintf(
-        '%s%s',
-        'localhost,localhost:3000,127.0.0.1,127.0.0.1:8000,::1',
-        Sanctum::currentApplicationUrlWithPort()
-    ))),
+    'stateful' => [],
 
     'guard' => ['web'],
 
-    'expiration' => null,
+    'expiration' => env('SANCTUM_TOKEN_EXPIRATION', null),
 
     'token_prefix' => env('SANCTUM_TOKEN_PREFIX', ''),
 

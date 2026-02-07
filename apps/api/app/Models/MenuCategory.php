@@ -15,6 +15,7 @@ class MenuCategory extends Model
         'store_id',
         'name',
         'description',
+        'theme',
         'sort_order',
         'is_active',
     ];

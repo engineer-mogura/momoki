@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BusinessSession;
 use App\Models\MenuItem;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Visit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -48,10 +50,21 @@ class OrderController extends Controller
         $user = $request->user();
         $visit = $user->currentVisit();
 
+        // Auto check-in if no active visit
         if (!$visit) {
-            return response()->json([
-                'error' => 'You must check in before ordering',
-            ], 400);
+            $storeId = (int) config('services.store.default_store_id');
+            $visit = Visit::create([
+                'user_id' => $user->id,
+                'store_id' => $storeId,
+                'business_session_id' => $this->currentSessionId($storeId),
+                'status' => Visit::STATUS_SEATED,
+                'checked_in_at' => now(),
+                'table_number' => null,
+            ]);
+        } elseif (is_null($visit->business_session_id)) {
+            $visit->update([
+                'business_session_id' => $this->currentSessionId((int) $visit->store_id),
+            ]);
         }
 
         $order = DB::transaction(function () use ($request, $user, $visit) {
@@ -60,7 +73,7 @@ class OrderController extends Controller
                 'visit_id' => $visit->id,
                 'user_id' => $user->id,
                 'store_id' => $visit->store_id,
-                'status' => Order::STATUS_PREPARING,
+                'status' => Order::STATUS_NEW,
                 'notes' => $request->notes,
             ]);
 
@@ -135,5 +148,12 @@ class OrderController extends Controller
                 'subtotal' => $item->subtotal,
             ]),
         ];
+    }
+
+    private function currentSessionId(int $storeId): ?int
+    {
+        return BusinessSession::where('store_id', $storeId)
+            ->whereNull('ended_at')
+            ->value('id');
     }
 }

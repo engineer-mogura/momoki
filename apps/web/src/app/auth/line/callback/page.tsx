@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getStoredAuthParams, clearStoredAuthParams } from '@/lib/line';
-import { api } from '@/lib/api';
+import { api, setAuthToken } from '@/lib/api';
 
 export default function LineLoginCallback() {
   const router = useRouter();
@@ -51,10 +51,15 @@ export default function LineLoginCallback() {
       }
 
       try {
-        await api.post('/api/auth/line/callback', {
+        const response = await api.post<{ user: unknown; token: string }>('/api/auth/line/callback', {
           code,
           code_verifier: storedParams.codeVerifier,
         });
+
+        // Store Bearer token in localStorage
+        if (response.token) {
+          setAuthToken(response.token);
+        }
 
         sessionStorage.setItem(processedKey, '1');
         clearStoredAuthParams();

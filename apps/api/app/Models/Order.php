@@ -11,15 +11,13 @@ class Order extends Model
 {
     use HasFactory;
 
-    public const STATUS_PREPARING = 'preparing';
+    public const STATUS_NEW = 'new';
     public const STATUS_SERVED = 'served';
-    public const STATUS_PAID = 'paid';
     public const STATUS_CANCELLED = 'cancelled';
 
     public const STATUSES = [
-        self::STATUS_PREPARING,
+        self::STATUS_NEW,
         self::STATUS_SERVED,
-        self::STATUS_PAID,
         self::STATUS_CANCELLED,
     ];
 
@@ -30,10 +28,14 @@ class Order extends Model
         'status',
         'total_amount',
         'notes',
+        'served_at',
+        'cancelled_at',
     ];
 
     protected $casts = [
         'total_amount' => 'integer',
+        'served_at' => 'datetime',
+        'cancelled_at' => 'datetime',
     ];
 
     /**

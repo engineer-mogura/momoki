@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Store;
+use App\Models\BusinessSession;
 use App\Models\Visit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -33,7 +33,9 @@ class VisitController extends Controller
         $visit = Visit::create([
             'user_id' => $user->id,
             'store_id' => $request->store_id,
+            'business_session_id' => $this->currentSessionId((int) $request->store_id),
             'table_number' => $request->table_number,
+            'status' => Visit::STATUS_SEATED,
             'checked_in_at' => now(),
         ]);
 
@@ -84,6 +86,35 @@ class VisitController extends Controller
     }
 
     /**
+     * Update table number for an active visit
+     */
+    public function updateTableNumber(Request $request, Visit $visit): JsonResponse
+    {
+        $request->validate([
+            'table_number' => 'required|string|max:20',
+        ]);
+
+        // Must be the owner's active visit
+        if ($visit->user_id !== $request->user()->id) {
+            return response()->json(['error' => 'Forbidden'], 403);
+        }
+
+        if (!$visit->isActive()) {
+            return response()->json(['error' => 'Visit is no longer active'], 400);
+        }
+
+        $visit->update(['table_number' => trim($request->table_number)]);
+
+        return response()->json([
+            'visit' => [
+                'id' => $visit->id,
+                'table_number' => $visit->table_number,
+                'checked_in_at' => $visit->checked_in_at->toIso8601String(),
+            ],
+        ]);
+    }
+
+    /**
      * Format visit for response
      */
     private function formatVisit(Visit $visit): array
@@ -100,5 +131,12 @@ class VisitController extends Controller
             'total_amount' => $visit->getTotalAmount(),
             'orders_count' => $visit->orders->count(),
         ];
+    }
+
+    private function currentSessionId(int $storeId): ?int
+    {
+        return BusinessSession::where('store_id', $storeId)
+            ->whereNull('ended_at')
+            ->value('id');
     }
 }

@@ -30,7 +30,14 @@ class DatabaseSeeder extends Seeder
             ['name' => 'Momoki Bar', 'description' => 'Welcome to Momoki Bar', 'is_active' => true]
         );
 
-        // Create menu categories and items
+        // Seed menu categories and items (with theme support)
+        $this->call([
+            MenuCategorySeeder::class,
+            MenuItemSeeder::class,
+        ]);
+
+        // OLD: Inline menu data (deprecated in favor of separate seeders)
+        /*
         $categories = [
             [
                 'name' => 'ウイスキー',
@@ -108,6 +115,7 @@ class DatabaseSeeder extends Seeder
                 );
             }
         }
+        */
 
         // ダミー注文データ（管理画面UI確認用）
         $this->seedDummyOrders($admin, $store);
