@@ -1,24 +1,21 @@
 FROM php:8.3-cli
 
-# system deps + postgres driver
 RUN apt-get update && apt-get install -y \
     git unzip libpq-dev \
   && docker-php-ext-install pdo pdo_pgsql \
   && rm -rf /var/lib/apt/lists/*
 
-# composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
+# ★ ここ重要：すでに Laravel ルートが build context
 WORKDIR /app
 
-# install deps
-COPY composer.json composer.lock ./
-RUN composer install --no-dev --prefer-dist --no-interaction --no-progress
-
-# copy app
+# 先に全部コピー（artisan を含める）
 COPY . .
 
-# permissions (runtime)
+# ここで artisan が存在する状態になる
+RUN composer install --no-dev --prefer-dist --no-interaction --no-progress
+
 RUN mkdir -p bootstrap/cache storage/framework/cache storage/framework/sessions storage/framework/views storage/logs \
   && chmod -R 777 bootstrap/cache storage
 
