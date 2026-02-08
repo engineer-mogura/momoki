@@ -17,9 +17,30 @@ class VisitController extends Controller
         $tz = config('services.business_day.timezone', 'Asia/Tokyo');
         $businessStart = config('services.business_day.start', '21:00');
         $date = $request->input('date', now($tz)->toDateString());
-        $session = BusinessSession::where('store_id', $storeId)
+        $openSession = BusinessSession::where('store_id', $storeId)
             ->whereNull('ended_at')
             ->first();
+        $session = null;
+
+        // Allow "history by business date" even while an open session exists.
+        // - If requested date matches open session business_date => show open session
+        // - Otherwise resolve session by business_date (ended session) and show it
+        if ($openSession) {
+            $openDate = $openSession->business_date?->toDateString();
+            if ($openDate === $date) {
+                $session = $openSession;
+            } else {
+                $session = BusinessSession::where('store_id', $storeId)
+                    ->whereDate('business_date', $date)
+                    ->orderByDesc('started_at')
+                    ->first();
+            }
+        } else {
+            $session = BusinessSession::where('store_id', $storeId)
+                ->whereDate('business_date', $date)
+                ->orderByDesc('started_at')
+                ->first();
+        }
 
         $query = Visit::with(['user', 'orders.orderItems']);
 

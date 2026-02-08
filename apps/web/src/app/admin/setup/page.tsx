@@ -54,7 +54,16 @@ export default function AdminSetupPage() {
       await refetch();
       router.replace('/admin');
     } catch (err) {
-      setError(err instanceof Error ? err.message : '招待コードが正しくありません');
+      const raw = err instanceof Error ? err.message : '';
+      if (raw === 'Invalid invite code') {
+        setError('招待コードが正しくありません');
+      } else if (raw === 'Admin setup is not configured') {
+        setError('管理者登録が設定されていません（招待コード未設定）');
+      } else if (raw) {
+        setError('登録に失敗しました');
+      } else {
+        setError('招待コードが正しくありません');
+      }
     } finally {
       setIsSubmitting(false);
     }

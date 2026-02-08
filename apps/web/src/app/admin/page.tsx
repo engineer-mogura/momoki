@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, type RefObject } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
@@ -57,11 +57,9 @@ interface VisitsResponse {
   date?: string;
 }
 
-interface CurrentSessionResponse {
-  session: BusinessSession | null;
-}
-
 // --- Constants ---
+
+const AUTO_REFRESH_STORAGE_KEY = 'momoki_admin_auto_refresh';
 
 const COLUMNS: { key: VisitStatus; label: string; color: string }[] = [
   { key: 'seated', label: '着席', color: 'border-blue-500' },
@@ -69,6 +67,9 @@ const COLUMNS: { key: VisitStatus; label: string; color: string }[] = [
   { key: 'checkout', label: '会計', color: 'border-green-500' },
   { key: 'done', label: '会計済み', color: 'border-gray-400' },
 ];
+
+// 「着席」はステータスとしては残しつつ、ボード列としては非表示（提供中へ統合）
+const BOARD_COLUMNS = COLUMNS.filter((c) => c.key !== 'seated');
 
 const NEXT_STATUS: Partial<Record<VisitStatus, VisitStatus>> = {
   seated: 'serving',
@@ -131,19 +132,87 @@ function formatSessionStartedAt(startedAt: string): string {
 export default function AdminPage() {
   const { user, isLoading: isAuthLoading, logout } = useAuth();
   const [visits, setVisits] = useState<AdminVisit[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [date, setDate] = useState(todayString());
   const [session, setSession] = useState<BusinessSession | null>(null);
   const [sessionAction, setSessionAction] = useState<'start' | 'end' | null>(null);
   const [isSessionUpdating, setIsSessionUpdating] = useState(false);
-  const [activeColumn, setActiveColumn] = useState<VisitStatus>('seated');
-  const [adminPing, setAdminPing] = useState<{ status: number; body: unknown } | null>(null);
-  const [isAdminPingLoading, setIsAdminPingLoading] = useState(false);
+  const [activeColumn, setActiveColumn] = useState<VisitStatus>('serving');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'live' | 'history'>('live');
+  const isHistoryMode = viewMode === 'history';
 
   const intervalRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
   const dateRef = useRef(date);
   dateRef.current = date;
+
+  const isUnauthenticatedError = (err: unknown): boolean => {
+    const anyErr = err as any;
+    if (anyErr?.status === 401) return true;
+    if (anyErr?.response?.status === 401) return true;
+    const msg = anyErr?.message;
+    if (typeof msg === 'string' && (msg.includes('Unauthenticated') || msg.includes('401'))) return true;
+    return false;
+  };
+
+  const handleUnauthenticated = useCallback(() => {
+    setSessionExpired(true);
+    setAutoRefreshEnabled(false);
+    try {
+      localStorage.setItem(AUTO_REFRESH_STORAGE_KEY, '0');
+    } catch {
+      // ignore
+    }
+    if (intervalRef.current) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  // Load persisted auto-refresh setting (default OFF)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(AUTO_REFRESH_STORAGE_KEY);
+      if (raw === '1' || raw === 'true') setAutoRefreshEnabled(true);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Persist auto-refresh setting
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(AUTO_REFRESH_STORAGE_KEY, autoRefreshEnabled ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }, [autoRefreshEnabled]);
+
+  // Logout confirm: ESC to close
+  useEffect(() => {
+    if (!logoutConfirmOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLogoutConfirmOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [logoutConfirmOpen]);
+
+  // Entering history mode forces auto-refresh off (cost safe)
+  useEffect(() => {
+    if (!isHistoryMode) return;
+    if (autoRefreshEnabled) setAutoRefreshEnabled(false);
+    if (intervalRef.current) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, [isHistoryMode, autoRefreshEnabled]);
 
   // Column refs for scroll
   const boardContainerRef = useRef<HTMLDivElement>(null);
@@ -152,86 +221,93 @@ export default function AdminPage() {
   const checkoutRef = useRef<HTMLDivElement>(null);
   const doneRef = useRef<HTMLDivElement>(null);
 
-  const columnRefs: Record<VisitStatus, React.RefObject<HTMLDivElement>> = {
+  const columnRefs: Record<VisitStatus, RefObject<HTMLDivElement>> = {
     seated: seatedRef,
     serving: servingRef,
     checkout: checkoutRef,
     done: doneRef,
   };
 
-  const fetchCurrentSession = useCallback(async () => {
-    if (!user?.is_admin) return;
-    try {
-      const response = await api.get<CurrentSessionResponse>('/api/admin/business-sessions/current');
-      setSession(response.session);
-    } catch (err) {
-      console.error('Failed to fetch business session:', err);
-    }
-  }, [user?.is_admin]);
+  const refreshVisits = useCallback(
+    async (opts?: { showSpinner?: boolean }) => {
+      if (!user?.is_admin) return;
+      if (sessionExpired) return;
+      if (inFlightRef.current) return;
+      if (document.visibilityState !== 'visible' && !opts?.showSpinner) return;
 
-  const fetchVisits = useCallback(async () => {
-    if (!user?.is_admin) return;
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
-    try {
-      const response = await api.get<VisitsResponse>('/api/admin/visits', {
-        params: { date: dateRef.current },
-      });
-      setVisits(response.visits);
-      setSession(response.session ?? null);
-    } catch (err) {
-      console.error('Failed to fetch visits:', err);
-    } finally {
-      inFlightRef.current = false;
-      setIsLoading(false);
-    }
-  }, [user?.is_admin]);
+      inFlightRef.current = true;
+      if (opts?.showSpinner) setIsRefreshing(true);
 
-  // Polling: 2-second interval with visibility & inFlight guards
+      try {
+        const response = await api.get<VisitsResponse>('/api/admin/visits', {
+          params: { date: dateRef.current },
+        });
+        setVisits(response.visits);
+        setSession(response.session ?? null);
+        setLastUpdatedAt(new Date());
+      } catch (err) {
+        if (isUnauthenticatedError(err)) {
+          handleUnauthenticated();
+          return;
+        }
+        console.error('Failed to fetch visits:', err);
+      } finally {
+        inFlightRef.current = false;
+        if (opts?.showSpinner) setIsRefreshing(false);
+      }
+    },
+    [user?.is_admin, sessionExpired, handleUnauthenticated]
+  );
+
+  // Auto refresh (optional): 15s interval, only when visible
   useEffect(() => {
     if (isAuthLoading || !user?.is_admin) return;
+    if (sessionExpired) return;
+    if (isHistoryMode) return;
 
-    let cancelled = false;
+    if (!autoRefreshEnabled) {
+      if (intervalRef.current) {
+        window.clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
+    }
 
-    const start = async () => {
-      if (cancelled) return;
-      await Promise.all([fetchCurrentSession(), fetchVisits()]);
-
-      if (cancelled || intervalRef.current) return;
+    if (!intervalRef.current) {
       intervalRef.current = window.setInterval(() => {
         if (document.visibilityState !== 'visible') return;
-        fetchVisits();
-      }, 2000);
-    };
-
-    start();
+        refreshVisits();
+      }, 15000);
+    }
 
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') fetchVisits();
+      if (!autoRefreshEnabled) return;
+      if (document.visibilityState === 'visible') refreshVisits();
     };
     document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
-      cancelled = true;
       document.removeEventListener('visibilitychange', onVisibility);
       if (intervalRef.current) {
         window.clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
     };
-  }, [isAuthLoading, user?.is_admin, fetchCurrentSession, fetchVisits]);
+  }, [autoRefreshEnabled, isAuthLoading, refreshVisits, sessionExpired, user?.is_admin, isHistoryMode]);
 
-  // Re-fetch when date changes + reset scroll
+  // Date changes: reset scroll only (no automatic fetch by default)
   useEffect(() => {
     if (!user?.is_admin) return;
-    setIsLoading(true);
-    fetchVisits();
-    // Reset scroll to first column
     if (boardContainerRef.current) {
       boardContainerRef.current.scrollTo({ left: 0 });
     }
-    setActiveColumn('seated');
-  }, [date, fetchVisits, user?.is_admin]);
+    setActiveColumn('serving');
+    if (isHistoryMode) {
+      refreshVisits({ showSpinner: true });
+      return;
+    }
+    if (autoRefreshEnabled && document.visibilityState === 'visible') refreshVisits();
+  }, [date, user?.is_admin, autoRefreshEnabled, refreshVisits, isHistoryMode]);
 
   // IntersectionObserver to track active column
   useEffect(() => {
@@ -274,7 +350,7 @@ export default function AdminPage() {
       setVisits((prev: AdminVisit[]) =>
         prev.map((v: AdminVisit) => (v.id === visitId ? { ...v, status: newStatus } : v))
       );
-      fetchVisits();
+      refreshVisits();
     } catch (err) {
       console.error('Failed to update visit status:', err);
     }
@@ -327,7 +403,7 @@ export default function AdminPage() {
     setIsSessionUpdating(true);
     try {
       await api.post(`/api/admin/business-sessions/${action}`);
-      await Promise.all([fetchCurrentSession(), fetchVisits()]);
+      await refreshVisits({ showSpinner: false });
     } catch (err) {
       console.error(`Failed to ${action} business session:`, err);
     } finally {
@@ -384,41 +460,6 @@ export default function AdminPage() {
 
   // --- Authenticated but not admin ---
   if (!user.is_admin) {
-    const handlePing = async () => {
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL;
-      if (!baseUrl) {
-        setAdminPing({ status: 0, body: { error: 'NEXT_PUBLIC_API_BASE_URL is not set' } });
-        return;
-      }
-
-      const token =
-        (typeof window !== 'undefined' && (localStorage.getItem('momoki_token') || localStorage.getItem('auth_token'))) ||
-        null;
-
-      setIsAdminPingLoading(true);
-      setAdminPing(null);
-      try {
-        const res = await fetch(`${baseUrl}/api/admin/business-sessions/current`, {
-          headers: {
-            Accept: 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        });
-        const text = await res.text();
-        let body: unknown = text;
-        try {
-          body = text ? JSON.parse(text) : null;
-        } catch {
-          // keep as text
-        }
-        setAdminPing({ status: res.status, body });
-      } catch (e) {
-        setAdminPing({ status: 0, body: { error: e instanceof Error ? e.message : 'Request failed' } });
-      } finally {
-        setIsAdminPingLoading(false);
-      }
-    };
-
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-900 px-4">
         <div className="bg-white w-full max-w-md rounded-xl border border-slate-200 shadow-sm p-6 text-center">
@@ -433,44 +474,45 @@ export default function AdminPage() {
             管理者セットアップへ
           </Link>
           <button
-            onClick={() => logout()}
+            onClick={() => setLogoutConfirmOpen(true)}
             className="w-full mt-3 text-sm text-slate-500 hover:text-slate-900 transition"
           >
             ログアウト
           </button>
-
-          <div className="mt-6 text-left">
-            <p className="text-xs font-semibold text-slate-700 mb-2">接続確認（Bearerでadmin API）</p>
-            <button
-              onClick={handlePing}
-              disabled={isAdminPingLoading}
-              className="w-full bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-800 text-xs font-semibold py-2 rounded-lg transition"
-            >
-              {isAdminPingLoading ? '確認中...' : 'GET /api/admin/business-sessions/current'}
-            </button>
-            {adminPing && (
-              <div className="mt-2 text-xs">
-                <div className="text-slate-600 mb-1">status: {adminPing.status || 'error'}</div>
-                <pre className="bg-slate-50 border border-slate-200 rounded p-2 overflow-auto max-h-40">
-                  {typeof adminPing.body === 'string' ? adminPing.body : JSON.stringify(adminPing.body, null, 2)}
-                </pre>
-              </div>
-            )}
-          </div>
         </div>
+
+        {logoutConfirmOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setLogoutConfirmOpen(false);
+            }}
+          >
+            <div className="bg-white rounded-lg p-5 w-full max-w-sm mx-4 shadow-xl">
+              <h3 className="text-sm font-bold text-slate-900 mb-2">ログアウトしますか？</h3>
+              <p className="text-xs text-slate-500 mb-4">再度ログインが必要になります。</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setLogoutConfirmOpen(false)}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2 rounded transition"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={() => logout()}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold py-2 rounded transition"
+                >
+                  ログアウト
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
   // --- Admin board loading ---
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       {/* Header - simplified */}
@@ -481,7 +523,7 @@ export default function AdminPage() {
               伝票ボード
             </Link>
             <button
-              onClick={() => logout()}
+              onClick={() => setLogoutConfirmOpen(true)}
               className="text-xs text-slate-500 hover:text-slate-900 transition"
             >
               ログアウト
@@ -490,12 +532,68 @@ export default function AdminPage() {
         </div>
       </header>
 
+      {logoutConfirmOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setLogoutConfirmOpen(false);
+          }}
+        >
+          <div className="bg-white rounded-lg p-5 w-full max-w-sm mx-4 shadow-xl">
+            <h3 className="text-sm font-bold text-slate-900 mb-2">ログアウトしますか？</h3>
+            <p className="text-xs text-slate-500 mb-4">再度ログインが必要になります。</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setLogoutConfirmOpen(false)}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2 rounded transition"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => logout()}
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold py-2 rounded transition"
+              >
+                ログアウト
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Body - with date nav + column jump */}
       <main className="pb-4">
+        {sessionExpired && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-3">
+            <div className="container mx-auto flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-amber-900">セッション切れ</p>
+                <p className="text-xs text-amber-800">
+                  ログインが期限切れになりました。再ログイン後に更新できます。
+                </p>
+              </div>
+              <Link
+                href="/admin/auth/line/start"
+                className="inline-flex items-center justify-center rounded-lg bg-[#00B900] hover:bg-[#00a000] text-white text-sm font-semibold px-4 py-2 transition"
+              >
+                再ログイン
+              </Link>
+            </div>
+          </div>
+        )}
+
         <div className="bg-white border-b border-slate-200 px-4 py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              {session ? (
+              {isHistoryMode ? (
+                <>
+                  <p className="text-sm font-semibold text-slate-700">履歴表示</p>
+                  <p className="text-xs text-slate-600">
+                    営業日: {date}
+                    {session?.started_at ? ` / 開始: ${formatSessionStartedAt(session.started_at)}` : ''}
+                  </p>
+                  <p className="text-xs text-slate-500">履歴閲覧中（操作はできません）</p>
+                </>
+              ) : session ? (
                 <>
                   <p className="text-sm font-semibold text-emerald-700">営業中</p>
                   <p className="text-xs text-slate-600">
@@ -510,17 +608,82 @@ export default function AdminPage() {
                 </>
               )}
             </div>
-            <button
-              onClick={() => setSessionAction(session ? 'end' : 'start')}
-              disabled={isSessionUpdating}
-              className={`rounded-lg px-3 py-2 text-sm font-semibold text-white transition ${
-                session
-                  ? 'bg-red-600 hover:bg-red-700 disabled:opacity-50'
-                  : 'bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50'
-              }`}
-            >
-              {session ? '営業終了' : '営業開始'}
-            </button>
+            <div className="flex items-center gap-2 justify-end">
+              {isHistoryMode ? (
+                <button
+                  onClick={() => {
+                    setViewMode('live');
+                    setDate(todayString());
+                  }}
+                  className="rounded-lg px-3 py-2 text-sm font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                >
+                  本日に戻る
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setViewMode('history');
+                    refreshVisits({ showSpinner: true });
+                  }}
+                  className="rounded-lg px-3 py-2 text-sm font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+                >
+                  履歴を見る
+                </button>
+              )}
+
+              {!isHistoryMode && (
+                <button
+                  onClick={() => setSessionAction(session ? 'end' : 'start')}
+                  disabled={isSessionUpdating}
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold text-white transition ${
+                    session
+                      ? 'bg-red-600 hover:bg-red-700 disabled:opacity-50'
+                      : 'bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50'
+                  }`}
+                >
+                  {session ? '営業終了' : '営業開始'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => refreshVisits({ showSpinner: true })}
+                disabled={isRefreshing || sessionExpired}
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-semibold px-3 py-2 transition"
+              >
+                {isRefreshing ? (
+                  <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                ) : (
+                  <span aria-hidden>⟳</span>
+                )}
+                {isHistoryMode ? '再取得' : '更新'}
+              </button>
+
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700 select-none">
+                <input
+                  type="checkbox"
+                  checked={autoRefreshEnabled && !isHistoryMode}
+                  onChange={() => {
+                    const next = !autoRefreshEnabled;
+                    setAutoRefreshEnabled(next);
+                    if (next) refreshVisits();
+                  }}
+                  disabled={sessionExpired || isHistoryMode}
+                  className="h-4 w-4"
+                />
+                自動更新（15秒）
+              </label>
+            </div>
+
+            <div className="text-xs text-slate-500">
+              最終更新{' '}
+              {lastUpdatedAt
+                ? lastUpdatedAt.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+                : '—'}
+            </div>
           </div>
         </div>
 
@@ -529,21 +692,21 @@ export default function AdminPage() {
           <div className="flex items-center gap-1 justify-center">
             <button
               onClick={() => setDate(shiftDate(date, -1))}
-              disabled={Boolean(session)}
+              disabled={Boolean(session) && !isHistoryMode}
               className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 text-xs px-2 py-1.5 rounded-l-lg transition"
             >
               前日
             </button>
             <button
               onClick={() => setDate(todayString())}
-              disabled={Boolean(session) || date === todayString()}
+              disabled={(Boolean(session) && !isHistoryMode) || date === todayString()}
               className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 text-xs px-2 py-1.5 transition"
             >
               本日
             </button>
             <button
               onClick={() => setDate(shiftDate(date, 1))}
-              disabled={Boolean(session)}
+              disabled={Boolean(session) && !isHistoryMode}
               className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 text-xs px-2 py-1.5 rounded-r-lg transition"
             >
               翌日
@@ -551,8 +714,8 @@ export default function AdminPage() {
             <input
               type="date"
               value={date}
-              disabled={Boolean(session)}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDate(e.target.value)}
+              disabled={Boolean(session) && !isHistoryMode}
+              onChange={(e: { target: { value: string } }) => setDate(e.target.value)}
               className="bg-white text-slate-900 border border-slate-300 rounded-lg px-3 py-1.5 text-sm ml-2 focus:outline-none focus:ring-2 focus:ring-primary-600 disabled:opacity-40 disabled:cursor-not-allowed"
             />
           </div>
@@ -561,8 +724,10 @@ export default function AdminPage() {
         {/* Column Jump Buttons */}
         <div className="bg-white border-b border-slate-200 px-2 py-2 sticky top-[57px] z-10">
           <div className="flex gap-1 overflow-x-auto">
-            {COLUMNS.map((col) => {
-              const count = visits.filter((v: AdminVisit) => v.status === col.key).length;
+            {BOARD_COLUMNS.map((col) => {
+              const count = visits.filter((v: AdminVisit) =>
+                col.key === 'serving' ? v.status === 'serving' || v.status === 'seated' : v.status === col.key
+              ).length;
               const isActive = activeColumn === col.key;
               return (
                 <button
@@ -586,9 +751,11 @@ export default function AdminPage() {
 
         {/* Board - horizontal scroll */}
         <div ref={boardContainerRef} className="px-2 py-4 overflow-x-auto">
-          <div className="flex gap-3 min-w-[900px]">
-            {COLUMNS.map((col) => {
-              const colVisits = visits.filter((v: AdminVisit) => v.status === col.key);
+          <div className="flex gap-3 min-w-[680px]">
+            {BOARD_COLUMNS.map((col) => {
+              const colVisits = visits.filter((v: AdminVisit) =>
+                col.key === 'serving' ? v.status === 'serving' || v.status === 'seated' : v.status === col.key
+              );
               return (
                 <div
                   key={col.key}
@@ -612,6 +779,7 @@ export default function AdminPage() {
                       <VisitCard
                         key={visit.id}
                         visit={visit}
+                        readOnly={isHistoryMode}
                         onStatusChange={handleUpdateStatus}
                         onServeOrder={handleServeOrder}
                         onCancelOrder={handleCancelOrder}
@@ -680,14 +848,16 @@ export default function AdminPage() {
 
 function VisitCard({
   visit,
+  readOnly,
   onStatusChange,
   onServeOrder,
   onCancelOrder,
 }: {
   visit: AdminVisit;
-  onStatusChange: (visitId: number, status: VisitStatus) => void;
-  onServeOrder: (orderId: number) => void;
-  onCancelOrder: (orderId: number) => void;
+  readOnly: boolean;
+  onStatusChange: (visitId: number, status: VisitStatus) => void | Promise<void>;
+  onServeOrder: (orderId: number) => void | Promise<void>;
+  onCancelOrder: (orderId: number) => void | Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ type: 'serve' | 'cancel' | 'reopen'; orderId?: number } | null>(null);
@@ -705,6 +875,11 @@ function VisitCard({
           <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded">
             {visit.table_number || '未設定'}
           </span>
+          {visit.status === 'seated' && (
+            <span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-1.5 py-0.5 rounded">
+              着席
+            </span>
+          )}
           <span className="text-slate-700 truncate max-w-[100px]">
             {visit.user.display_name || '不明'}
           </span>
@@ -777,6 +952,7 @@ function VisitCard({
                         {isNew && (
                           <button
                             onClick={() => setConfirmAction({ type: 'serve', orderId: order.id })}
+                            disabled={readOnly}
                             className="text-green-600 hover:text-green-700 text-[10px] px-1 py-0.5 border border-green-300 rounded hover:border-green-400 transition"
                           >
                             提供済
@@ -785,6 +961,7 @@ function VisitCard({
                         {canCancelOrders && !isCancelled && (
                           <button
                             onClick={() => setConfirmAction({ type: 'cancel', orderId: order.id })}
+                            disabled={readOnly}
                             className="text-red-500 hover:text-red-600 text-[10px] px-1 py-0.5 border border-red-300 rounded hover:border-red-400 transition"
                           >
                             削除
@@ -814,37 +991,39 @@ function VisitCard({
       )}
 
       {/* Status buttons */}
-      <div className="flex gap-1 mt-2">
-        {prev && (
-          <button
-            onClick={() => {
-              if (isDone) {
-                setConfirmAction({ type: 'reopen' });
-              } else {
-                onStatusChange(visit.id, prev);
-              }
-            }}
-            className={`flex-none text-xs py-1.5 px-2 rounded transition ${
-              isDone
-                ? 'bg-red-600 hover:bg-red-700 text-white'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-            }`}
-          >
-            {PREV_LABEL[visit.status]}
-          </button>
-        )}
-        {next && (
-          <button
-            onClick={() => onStatusChange(visit.id, next)}
-            className="flex-1 bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold py-1.5 px-2 rounded transition"
-          >
-            {NEXT_LABEL[visit.status]}
-          </button>
-        )}
-      </div>
+      {!readOnly && (
+        <div className="flex gap-1 mt-2">
+          {prev && (
+            <button
+              onClick={() => {
+                if (isDone) {
+                  setConfirmAction({ type: 'reopen' });
+                } else {
+                  onStatusChange(visit.id, prev);
+                }
+              }}
+              className={`flex-none text-xs py-1.5 px-2 rounded transition ${
+                isDone
+                  ? 'bg-red-600 hover:bg-red-700 text-white'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+              }`}
+            >
+              {PREV_LABEL[visit.status]}
+            </button>
+          )}
+          {next && (
+            <button
+              onClick={() => onStatusChange(visit.id, next)}
+              className="flex-1 bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold py-1.5 px-2 rounded transition"
+            >
+              {NEXT_LABEL[visit.status]}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Confirmation Modal */}
-      {confirmAction && (
+      {confirmAction && !readOnly && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-lg p-5 w-full max-w-xs mx-4 shadow-xl">
             {confirmAction.type === 'reopen' ? (

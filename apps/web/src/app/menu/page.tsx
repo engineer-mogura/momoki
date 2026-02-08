@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -17,6 +17,98 @@ export default function MenuPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('drink');
   const { addItem, totalItems, totalAmount } = useCart();
+  const cartCtaRef = useRef<HTMLAnchorElement | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const [toastVisible, setToastVisible] = useState(false);
+
+  const getPrefersReducedMotion = () => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
+  };
+
+  const bounceCartCta = (el: HTMLElement) => {
+    try {
+      el.animate(
+        [
+          { transform: 'scale(1)' },
+          { transform: 'scale(1.06)' },
+          { transform: 'scale(1)' },
+        ],
+        { duration: 420, easing: 'ease-out' }
+      );
+    } catch {
+      // ignore (WAAPI not supported)
+    }
+  };
+
+  const flyDotToCart = (
+    startX: number,
+    startY: number,
+    targetEl: HTMLElement | null,
+    onFinish?: () => void
+  ) => {
+    const end = (() => {
+      if (targetEl) {
+        const r = targetEl.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }
+      // Fallback: bottom center-ish
+      return { x: window.innerWidth / 2, y: window.innerHeight - 56 };
+    })();
+
+    const dot = document.createElement('div');
+    const size = 16;
+    dot.style.position = 'fixed';
+    dot.style.left = `${startX - size / 2}px`;
+    dot.style.top = `${startY - size / 2}px`;
+    dot.style.width = `${size}px`;
+    dot.style.height = `${size}px`;
+    dot.style.borderRadius = '9999px';
+    dot.style.background = '#ea580c'; // tailwind orange-600
+    dot.style.border = '2px solid rgba(255,255,255,0.9)';
+    dot.style.boxShadow = '0 8px 18px rgba(0,0,0,0.18)';
+    dot.style.zIndex = '9999';
+    dot.style.pointerEvents = 'none';
+
+    document.body.appendChild(dot);
+
+    const dx = end.x - startX;
+    const dy = end.y - startY;
+
+    try {
+      const anim = dot.animate(
+        [
+          { transform: 'translate(0px, 0px) scale(1)', opacity: 1 },
+          { transform: `translate(${dx}px, ${dy}px) scale(0.2)`, opacity: 0 },
+        ],
+        { duration: 980, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)', fill: 'forwards' }
+      );
+      anim.addEventListener(
+        'finish',
+        () => {
+          dot.remove();
+          onFinish?.();
+        },
+        { once: true }
+      );
+      anim.addEventListener('cancel', () => dot.remove(), { once: true });
+    } catch {
+      // Fallback: remove immediately if animation not supported
+      dot.remove();
+    }
+  };
+
+  const showToast = () => {
+    setToastVisible(true);
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToastVisible(false), 1600);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   // Initialize tab from URL query params
   useEffect(() => {
@@ -49,8 +141,29 @@ export default function MenuPage() {
     router.replace(`?${params.toString()}`, { scroll: false });
   };
 
-  const handleAddToCart = (item: MenuItem) => {
+  const handleAddToCart = (item: MenuItem, fromEl: HTMLElement) => {
     addItem(item);
+
+    if (typeof window === 'undefined') return;
+    const fromRect = fromEl.getBoundingClientRect();
+    const startX = fromRect.left + fromRect.width / 2;
+    const startY = fromRect.top + fromRect.height / 2;
+    const reduceMotion = getPrefersReducedMotion();
+
+    // Run after React commit so CTA has a chance to mount (first add)
+    window.setTimeout(() => {
+      const target = cartCtaRef.current;
+      const startBounce = () => {
+        if (target) bounceCartCta(target);
+      };
+
+      if (!reduceMotion) {
+        flyDotToCart(startX, startY, target, () => window.setTimeout(startBounce, 120));
+      } else {
+        window.setTimeout(startBounce, 120);
+      }
+      showToast();
+    }, 0);
   };
 
   // Filter categories by theme
@@ -194,7 +307,7 @@ export default function MenuPage() {
                       </p>
                     </div>
                     <button
-                      onClick={() => handleAddToCart(item)}
+                      onClick={(e: MouseEvent<HTMLButtonElement>) => handleAddToCart(item, e.currentTarget)}
                       className={`py-2 px-4 rounded-lg transition ml-4 font-semibold ${
                         isDarkTab
                           ? 'bg-amber-500 hover:bg-amber-600 text-slate-900'
@@ -223,10 +336,19 @@ export default function MenuPage() {
             </div>
             <Link
               href="/cart"
+              ref={cartCtaRef}
               className="font-semibold py-3 px-8 rounded-lg transition bg-primary-600 hover:bg-primary-700 text-white"
             >
               カートを見る
             </Link>
+          </div>
+        </div>
+      )}
+
+      {toastVisible && (
+        <div className="fixed left-0 right-0 bottom-24 flex justify-center pointer-events-none">
+          <div className="bg-slate-900/90 text-white text-xs px-3 py-2 rounded-full shadow">
+            カートに追加しました
           </div>
         </div>
       )}

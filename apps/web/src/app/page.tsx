@@ -40,14 +40,6 @@ export default function Home() {
                 >
                   注文履歴
                 </Link>
-                {user.is_admin && (
-                  <Link
-                    href="/admin"
-                    className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold py-3 px-6 rounded-lg transition"
-                  >
-                    管理画面へ
-                  </Link>
-                )}
               </div>
             </div>
           ) : (
@@ -67,6 +59,18 @@ export default function Home() {
             </div>
           )}
         </div>
+
+        <footer className="mt-16 pt-8 border-t border-slate-200">
+          <div className="text-center">
+            <Link
+              href="/admin"
+              rel="nofollow"
+              className="inline-block text-xs text-slate-400 hover:text-slate-600 transition px-3 py-2"
+            >
+              店舗スタッフの方はこちら
+            </Link>
+          </div>
+        </footer>
       </div>
     </main>
   );
