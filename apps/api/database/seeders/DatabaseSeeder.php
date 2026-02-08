@@ -25,10 +25,12 @@ class DatabaseSeeder extends Seeder
         );
 
         // Create store
-        $store = Store::firstOrCreate(
-            ['slug' => 'momoki'],
-            ['name' => 'Momoki Bar', 'description' => 'Welcome to Momoki Bar', 'is_active' => true]
-        );
+        $this->call(StoreSeeder::class);
+        $store = Store::where('slug', 'momoki')->first();
+        if (!$store) {
+            // Fail-safe (should not happen)
+            $store = Store::create(['name' => 'Momoki Bar', 'slug' => 'momoki', 'is_active' => true]);
+        }
 
         // Seed menu categories and items (with theme support)
         $this->call([

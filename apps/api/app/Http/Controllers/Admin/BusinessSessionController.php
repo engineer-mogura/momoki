@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\BusinessSession;
+use App\Models\Store;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -13,7 +14,11 @@ class BusinessSessionController extends Controller
 {
     public function current(): JsonResponse
     {
-        $storeId = (int) config('services.store.default_store_id', 1);
+        $resolved = $this->resolveStoreId();
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
+        }
+        $storeId = $resolved;
         $session = BusinessSession::where('store_id', $storeId)
             ->whereNull('ended_at')
             ->first();
@@ -25,7 +30,25 @@ class BusinessSessionController extends Controller
 
     public function start(Request $request): JsonResponse
     {
-        $storeId = (int) config('services.store.default_store_id', 1);
+        // Optional: allow specifying store_id (future multi-store)
+        $requestedStoreId = $request->input('store_id');
+        if ($requestedStoreId !== null) {
+            $requestedStoreId = (int) $requestedStoreId;
+            if (!Store::whereKey($requestedStoreId)->exists()) {
+                return response()->json([
+                    'error' => 'STORE_NOT_FOUND',
+                    'message' => '指定された店舗が見つかりません',
+                ], 404);
+            }
+            $storeId = $requestedStoreId;
+        } else {
+            $resolved = $this->resolveStoreId();
+            if ($resolved instanceof JsonResponse) {
+                return $resolved;
+            }
+            $storeId = $resolved;
+        }
+
         $tz = config('services.business_day.timezone', 'Asia/Tokyo');
 
         try {
@@ -65,7 +88,11 @@ class BusinessSessionController extends Controller
 
     public function end(): JsonResponse
     {
-        $storeId = (int) config('services.store.default_store_id', 1);
+        $resolved = $this->resolveStoreId();
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
+        }
+        $storeId = $resolved;
 
         $session = BusinessSession::where('store_id', $storeId)
             ->whereNull('ended_at')
@@ -94,5 +121,29 @@ class BusinessSessionController extends Controller
             'started_at' => $session->started_at?->toIso8601String(),
             'ended_at' => $session->ended_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Resolve store id safely.
+     * - Prefer DEFAULT_STORE_ID if it exists
+     * - Fallback to the first store
+     * - If no stores exist, return 422 (instead of 500 FK violation)
+     */
+    private function resolveStoreId(): int|JsonResponse
+    {
+        $defaultStoreId = (int) config('services.store.default_store_id', 1);
+        if (Store::whereKey($defaultStoreId)->exists()) {
+            return $defaultStoreId;
+        }
+
+        $firstStoreId = Store::query()->orderBy('id')->value('id');
+        if ($firstStoreId) {
+            return (int) $firstStoreId;
+        }
+
+        return response()->json([
+            'error' => 'STORE_NOT_FOUND',
+            'message' => '店舗が存在しません。先に stores を作成してください。',
+        ], 422);
     }
 }

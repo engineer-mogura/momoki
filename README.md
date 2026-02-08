@@ -119,6 +119,7 @@ docker compose logs -f api
 
 ```bash
 docker compose exec api php artisan migrate
+docker compose exec api php artisan db:seed --class=StoreSeeder
 docker compose exec api php artisan db:seed
 ```
 
