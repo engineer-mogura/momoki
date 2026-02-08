@@ -16,11 +16,15 @@ class AuthController extends Controller
      */
     public function lineCallback(Request $request): JsonResponse
     {
+        $clientId = config('services.line.client_id');
+        $clientSecret = config('services.line.client_secret');
+        $redirectUri = config('services.line.redirect_uri');
+
         Log::info('lineCallback start', [
             'has_code' => (bool) $request->input('code'),
             'has_code_verifier' => (bool) $request->input('code_verifier'),
-            'redirect_uri' => config('services.line.redirect_uri'),
-            'client_id' => config('services.line.client_id'),
+            'redirect_uri' => $redirectUri,
+            'client_id' => $clientId,
             'ip' => $request->ip(),
             'user_agent' => $request->userAgent(),
             'referer' => $request->header('referer'),
@@ -32,13 +36,35 @@ class AuthController extends Controller
             'code_verifier' => 'required|string', // PKCE
         ]);
 
+        if (empty($clientId) || empty($clientSecret) || empty($redirectUri)) {
+            Log::error('LINE config missing', [
+                'has_client_id' => !empty($clientId),
+                'has_client_secret' => !empty($clientSecret),
+                'has_redirect_uri' => !empty($redirectUri),
+                'expected_env' => [
+                    'LINE_CHANNEL_ID',
+                    'LINE_CHANNEL_SECRET',
+                    'LINE_REDIRECT_URI',
+                ],
+            ]);
+
+            return response()->json([
+                'error' => 'LINE login is not configured',
+                'missing' => [
+                    'LINE_CHANNEL_ID' => empty($clientId),
+                    'LINE_CHANNEL_SECRET' => empty($clientSecret),
+                    'LINE_REDIRECT_URI' => empty($redirectUri),
+                ],
+            ], 500);
+        }
+
         // Exchange code for tokens
         $tokenResponse = Http::asForm()->post('https://api.line.me/oauth2/v2.1/token', [
             'grant_type' => 'authorization_code',
             'code' => $request->code,
-            'redirect_uri' => config('services.line.redirect_uri'),
-            'client_id' => config('services.line.client_id'),
-            'client_secret' => config('services.line.client_secret'),
+            'redirect_uri' => $redirectUri,
+            'client_id' => $clientId,
+            'client_secret' => $clientSecret,
             'code_verifier' => $request->code_verifier,
         ]);
 
@@ -66,7 +92,7 @@ class AuthController extends Controller
         // Verify and decode ID token
         $verifyResponse = Http::asForm()->post('https://api.line.me/oauth2/v2.1/verify', [
             'id_token' => $idToken,
-            'client_id' => config('services.line.client_id'),
+            'client_id' => $clientId,
         ]);
 
         if (!$verifyResponse->successful()) {

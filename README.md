@@ -74,8 +74,8 @@ cp apps/web/.env.example apps/web/.env.local
 
 ```env
 # LINE Login (LINE Developers で取得)
-LINE_CLIENT_ID=your_channel_id
-LINE_CLIENT_SECRET=your_channel_secret
+LINE_CHANNEL_ID=your_channel_id
+LINE_CHANNEL_SECRET=your_channel_secret
 LINE_REDIRECT_URI=http://localhost:3000/admin/auth/line/callback
 
 # Admin（招待コード）
@@ -252,8 +252,8 @@ LINEログイン〜注文までの動作に必要な環境変数の一覧です�
 | SESSION_SAME_SITE | ✅ | `lax` | `none` | クロスサイトCookie |
 | SANCTUM_STATEFUL_DOMAINS | ✅ | `localhost:3000` | `yourapp.vercel.app` | SPA認証ドメイン |
 | CORS_ALLOWED_ORIGINS | ✅ | `http://localhost:3000` | `https://yourapp.vercel.app` | CORS許可 |
-| LINE_CLIENT_ID | ✅ | `1234567890` | `1234567890` | LINEチャネルID |
-| LINE_CLIENT_SECRET | ✅ | `xxxxxxxx` | `xxxxxxxx` | LINEシークレット |
+| LINE_CHANNEL_ID | ✅ | `1234567890` | `1234567890` | LINEチャネルID |
+| LINE_CHANNEL_SECRET | ✅ | `xxxxxxxx` | `xxxxxxxx` | LINEシークレット |
 | LINE_REDIRECT_URI | ✅ | `http://localhost:3000/admin/auth/line/callback` | `https://yourapp.vercel.app/admin/auth/line/callback` | コールバックURL |
 | ADMIN_INVITE_CODE | ✅ | `changeme` | `(任意の文字列)` | 管理者招待コード |
 
@@ -300,8 +300,8 @@ Next.js側では `fetch` に `credentials: 'include'` を指定（実装済み�
    SESSION_SAME_SITE=none
    SANCTUM_STATEFUL_DOMAINS=yourapp.vercel.app
    CORS_ALLOWED_ORIGINS=https://yourapp.vercel.app
-   LINE_CLIENT_ID=...
-   LINE_CLIENT_SECRET=...
+   LINE_CHANNEL_ID=...
+   LINE_CHANNEL_SECRET=...
    LINE_REDIRECT_URI=https://yourapp.vercel.app/admin/auth/line/callback
    ```
 4. マイグレーション実行（Railway Shell）:
