@@ -5,8 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -34,35 +32,6 @@ class AuthController extends Controller
             'code_verifier' => 'required|string', // PKCE
         ]);
 
-        // 冪等化: 同じ code の二重処理を防止
-        $code = $request->input('code');
-        $cacheKey = 'line:auth_code:' . hash('sha256', $code);
-
-        if (Cache::has($cacheKey)) {
-            Log::info('lineCallback deduped (code already processed)', [
-                'code_hash' => substr(hash('sha256', $code), 0, 12),
-            ]);
-
-            // 既にログイン済みならユーザー情報を返す
-            $user = Auth::guard('web')->user();
-            if ($user) {
-                return response()->json([
-                    'user' => [
-                        'id' => $user->id,
-                        'display_name' => $user->display_name,
-                        'picture_url' => $user->picture_url,
-                        'is_admin' => $user->is_admin,
-                    ],
-                    'deduped' => true,
-                ]);
-            }
-
-            return response()->json(['status' => 'ok', 'deduped' => true]);
-        }
-
-        // ロックを先に取得（5分間保持）
-        Cache::put($cacheKey, true, now()->addMinutes(5));
-
         // Exchange code for tokens
         $tokenResponse = Http::asForm()->post('https://api.line.me/oauth2/v2.1/token', [
             'grant_type' => 'authorization_code',
@@ -74,8 +43,6 @@ class AuthController extends Controller
         ]);
 
         if (!$tokenResponse->successful()) {
-            // 失敗時はキャッシュを消して再試行可能にする
-            Cache::forget($cacheKey);
             Log::warning('lineCallback token exchange failed', [
                 'status' => $tokenResponse->status(),
                 'body' => $tokenResponse->json(),
@@ -132,11 +99,11 @@ class AuthController extends Controller
             ]
         );
 
-        // Revoke all existing tokens for this user (for security)
-        $user->tokens()->delete();
+        // 同名トークンのみ更新（全端末ログアウトを避ける）
+        $user->tokens()->where('name', 'liff')->delete();
 
         // Create a new Personal Access Token
-        $token = $user->createToken('web-app', ['*'])->plainTextToken;
+        $token = $user->createToken('liff')->plainTextToken;
 
         Log::info('lineCallback success', [
             'user_id' => $user->id,
