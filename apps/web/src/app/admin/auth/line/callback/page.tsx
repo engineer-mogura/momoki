@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { getStoredAuthParams, clearStoredAuthParams } from '@/lib/line';
 import { api, setAuthToken } from '@/lib/api';
 
-export default function LineLoginCallback() {
+export default function AdminLineLoginCallback() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +35,7 @@ export default function LineLoginCallback() {
       // 同じ code を処理済みならスキップ
       const processedKey = `line_cb_done:${code}`;
       if (sessionStorage.getItem(processedKey)) {
-        router.replace('/');
+        router.replace('/admin');
         return;
       }
 
@@ -50,7 +50,7 @@ export default function LineLoginCallback() {
         return;
       }
 
-      const redirectTo = storedParams.postLoginRedirect || '/';
+      const redirectTo = storedParams.postLoginRedirect || '/admin';
 
       try {
         const response = await api.post<{ user: unknown; token: string }>('/api/auth/line/callback', {
@@ -58,7 +58,6 @@ export default function LineLoginCallback() {
           code_verifier: storedParams.codeVerifier,
         });
 
-        // Store Bearer token in localStorage
         if (response.token) {
           setAuthToken(response.token);
         }
@@ -82,10 +81,10 @@ export default function LineLoginCallback() {
           <h1 className="text-xl font-bold mb-2">ログインエラー</h1>
           <p className="text-gray-400 mb-6">{error}</p>
           <button
-            onClick={() => router.push('/')}
+            onClick={() => router.push('/admin')}
             className="bg-primary-600 hover:bg-primary-700 text-white font-semibold py-2 px-6 rounded-lg transition"
           >
-            トップへ戻る
+            管理画面へ戻る
           </button>
         </div>
       </div>
@@ -101,3 +100,4 @@ export default function LineLoginCallback() {
     </div>
   );
 }
+

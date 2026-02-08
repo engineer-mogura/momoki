@@ -76,7 +76,7 @@ cp apps/web/.env.example apps/web/.env.local
 # LINE Login (LINE Developers で取得)
 LINE_CLIENT_ID=your_channel_id
 LINE_CLIENT_SECRET=your_channel_secret
-LINE_REDIRECT_URI=http://localhost:3000/auth/line/callback
+LINE_REDIRECT_URI=http://localhost:3000/admin/auth/line/callback
 
 # Admin（招待コード）
 ADMIN_INVITE_CODE=your_secret_code
@@ -89,9 +89,9 @@ ADMIN_INVITE_CODE=your_secret_code
 `apps/web/.env.local` を開いて設定:
 
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_LINE_CLIENT_ID=your_channel_id
-NEXT_PUBLIC_LINE_REDIRECT_URI=http://localhost:3000/auth/line/callback
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_LINE_CHANNEL_ID=your_channel_id
+NEXT_PUBLIC_LINE_REDIRECT_URI=http://localhost:3000/admin/auth/line/callback
 ```
 
 ### 5. Docker起動（初回ビルド含む）
@@ -180,7 +180,7 @@ docker compose restart api
 3. **LINEログインフロー確認**
    - LINE認証画面にリダイレクトされる
    - LINEアカウントでログイン
-   - `http://localhost:3000/auth/line/callback?code=...` に戻る
+   - `http://localhost:3000/admin/auth/line/callback?code=...` に戻る
    - ホーム画面に遷移し、ユーザー名が表示されればOK
 
 4. **ネットワーク確認（開発者ツール）**
@@ -188,7 +188,7 @@ docker compose restart api
    - `/api/auth/line/callback` への POST が 200 で返っているか確認
    - `/api/auth/user` への GET でユーザー情報が取得できているか確認
 
-> **Note**: LINE Developers で Callback URL に `http://localhost:3000/auth/line/callback` を登録しておく必要があります。
+> **Note**: LINE Developers で Callback URL に `http://localhost:3000/admin/auth/line/callback` を登録しておく必要があります。
 
 ### 10. 管理者登録の動作確認
 
@@ -223,8 +223,8 @@ curl http://localhost:8000/api/health
 2. 新規プロバイダー作成 → 新規チャネル作成（LINE Login）
 3. 「LINE Login設定」で以下を設定:
    - コールバックURL:
-     - ローカル: `http://localhost:3000/auth/line/callback`
-     - 本番: `https://yourapp.vercel.app/auth/line/callback`
+     - ローカル: `http://localhost:3000/admin/auth/line/callback`
+     - 本番: `https://yourapp.vercel.app/admin/auth/line/callback`
 4. 「チャネル基本設定」からチャネルID、チャネルシークレットを取得
 
 ## 環境変数一覧
@@ -254,16 +254,16 @@ LINEログイン〜注文までの動作に必要な環境変数の一覧です�
 | CORS_ALLOWED_ORIGINS | ✅ | `http://localhost:3000` | `https://yourapp.vercel.app` | CORS許可 |
 | LINE_CLIENT_ID | ✅ | `1234567890` | `1234567890` | LINEチャネルID |
 | LINE_CLIENT_SECRET | ✅ | `xxxxxxxx` | `xxxxxxxx` | LINEシークレット |
-| LINE_REDIRECT_URI | ✅ | `http://localhost:3000/auth/line/callback` | `https://yourapp.vercel.app/auth/line/callback` | コールバックURL |
+| LINE_REDIRECT_URI | ✅ | `http://localhost:3000/admin/auth/line/callback` | `https://yourapp.vercel.app/admin/auth/line/callback` | コールバックURL |
 | ADMIN_INVITE_CODE | ✅ | `changeme` | `(任意の文字列)` | 管理者招待コード |
 
 #### Next.js Web (apps/web/.env.local)
 
 | 変数名 | 必須 | ローカル例 | 本番例 | 説明 |
 |--------|:----:|-----------|--------|------|
-| NEXT_PUBLIC_API_URL | ✅ | `http://localhost:8000` | `https://yourapi.up.railway.app` | APIエンドポイント |
-| NEXT_PUBLIC_LINE_CLIENT_ID | ✅ | `1234567890` | `1234567890` | LINEチャネルID |
-| NEXT_PUBLIC_LINE_REDIRECT_URI | ✅ | `http://localhost:3000/auth/line/callback` | `https://yourapp.vercel.app/auth/line/callback` | コールバックURL |
+| NEXT_PUBLIC_API_BASE_URL | ✅ | `http://localhost:8000` | `https://momoki-production.up.railway.app` | APIベースURL |
+| NEXT_PUBLIC_LINE_CHANNEL_ID | ✅ | `1234567890` | `1234567890` | LINEチャネルID |
+| NEXT_PUBLIC_LINE_REDIRECT_URI | ✅ | `http://localhost:3000/admin/auth/line/callback` | `https://yourapp.vercel.app/admin/auth/line/callback` | コールバックURL |
 | NEXT_PUBLIC_ADMIN_SETUP_ENABLED | | `true` | `false` | 管理者登録の表示制御 |
 
 ### 本番（クロスドメイン）Cookie設定の注意
@@ -302,7 +302,7 @@ Next.js側では `fetch` に `credentials: 'include'` を指定（実装済み�
    CORS_ALLOWED_ORIGINS=https://yourapp.vercel.app
    LINE_CLIENT_ID=...
    LINE_CLIENT_SECRET=...
-   LINE_REDIRECT_URI=https://yourapp.vercel.app/auth/line/callback
+   LINE_REDIRECT_URI=https://yourapp.vercel.app/admin/auth/line/callback
    ```
 4. マイグレーション実行（Railway Shell）:
    ```bash
@@ -317,9 +317,9 @@ Next.js側では `fetch` に `credentials: 'include'` を指定（実装済み�
 3. Root Directory: `apps/web`
 4. 環境変数を設定:
    ```
-   NEXT_PUBLIC_API_URL=https://yourapi.up.railway.app
-   NEXT_PUBLIC_LINE_CLIENT_ID=...
-   NEXT_PUBLIC_LINE_REDIRECT_URI=https://yourapp.vercel.app/auth/line/callback
+   NEXT_PUBLIC_API_BASE_URL=https://momoki-production.up.railway.app
+   NEXT_PUBLIC_LINE_CHANNEL_ID=...
+   NEXT_PUBLIC_LINE_REDIRECT_URI=https://yourapp.vercel.app/admin/auth/line/callback
    ```
 
 ## CORS / Cookie 設定（本番）

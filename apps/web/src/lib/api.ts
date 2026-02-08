@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface FetchOptions extends RequestInit {
   params?: Record<string, string>;
@@ -9,20 +9,22 @@ interface FetchOptions extends RequestInit {
  */
 function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem('auth_token');
+  // Prefer new key, fallback to legacy key
+  return localStorage.getItem('momoki_token') || localStorage.getItem('auth_token');
 }
 
 /**
  * Store authentication token in localStorage
  */
 export function setAuthToken(token: string): void {
-  localStorage.setItem('auth_token', token);
+  localStorage.setItem('momoki_token', token);
 }
 
 /**
  * Remove authentication token from localStorage
  */
 export function clearAuthToken(): void {
+  localStorage.removeItem('momoki_token');
   localStorage.removeItem('auth_token');
 }
 
@@ -94,4 +96,4 @@ class ApiClient {
   }
 }
 
-export const api = new ApiClient(API_URL);
+export const api = new ApiClient(API_BASE_URL);

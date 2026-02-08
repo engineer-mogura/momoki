@@ -1,5 +1,10 @@
-const LINE_CLIENT_ID = process.env.NEXT_PUBLIC_LINE_CLIENT_ID || '';
-const LINE_REDIRECT_URI = process.env.NEXT_PUBLIC_LINE_REDIRECT_URI || 'http://localhost:3000/auth/line/callback';
+const LINE_CLIENT_ID =
+  process.env.NEXT_PUBLIC_LINE_CHANNEL_ID || process.env.NEXT_PUBLIC_LINE_CLIENT_ID || '';
+const LINE_REDIRECT_URI =
+  process.env.NEXT_PUBLIC_LINE_REDIRECT_URI || 'http://localhost:3000/auth/line/callback';
+
+const PKCE_STORAGE_KEY = 'momoki_line_pkce';
+const PKCE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 // Generate random string for state and code_verifier
 function generateRandomString(length: number): string {
@@ -22,13 +27,27 @@ async function generateCodeChallenge(codeVerifier: string): Promise<string> {
 }
 
 export async function startLineLogin(): Promise<void> {
+  return startLineLoginWithRedirect('/');
+}
+
+export function startAdminLineLogin(): Promise<void> {
+  return startLineLoginWithRedirect('/admin');
+}
+
+export async function startLineLoginWithRedirect(postLoginRedirect: string): Promise<void> {
   const state = generateRandomString(32);
   const codeVerifier = generateRandomString(64);
   const codeChallenge = await generateCodeChallenge(codeVerifier);
 
-  // Store state and code_verifier in sessionStorage
-  sessionStorage.setItem('line_state', state);
-  sessionStorage.setItem('line_code_verifier', codeVerifier);
+  localStorage.setItem(
+    PKCE_STORAGE_KEY,
+    JSON.stringify({
+      state,
+      codeVerifier,
+      createdAt: Date.now(),
+      postLoginRedirect,
+    })
+  );
 
   const params = new URLSearchParams({
     response_type: 'code',
@@ -43,18 +62,34 @@ export async function startLineLogin(): Promise<void> {
   window.location.href = `https://access.line.me/oauth2/v2.1/authorize?${params.toString()}`;
 }
 
-export function getStoredAuthParams(): { state: string; codeVerifier: string } | null {
-  const state = sessionStorage.getItem('line_state');
-  const codeVerifier = sessionStorage.getItem('line_code_verifier');
+export function getStoredAuthParams(): { state: string; codeVerifier: string; postLoginRedirect: string } | null {
+  const raw = localStorage.getItem(PKCE_STORAGE_KEY);
+  if (!raw) return null;
 
-  if (!state || !codeVerifier) {
+  try {
+    const parsed = JSON.parse(raw) as {
+      state?: string;
+      codeVerifier?: string;
+      createdAt?: number;
+      postLoginRedirect?: string;
+    };
+
+    if (!parsed.state || !parsed.codeVerifier || !parsed.createdAt) return null;
+    if (Date.now() - parsed.createdAt > PKCE_TTL_MS) {
+      localStorage.removeItem(PKCE_STORAGE_KEY);
+      return null;
+    }
+
+    return {
+      state: parsed.state,
+      codeVerifier: parsed.codeVerifier,
+      postLoginRedirect: parsed.postLoginRedirect || '/',
+    };
+  } catch {
     return null;
   }
-
-  return { state, codeVerifier };
 }
 
 export function clearStoredAuthParams(): void {
-  sessionStorage.removeItem('line_state');
-  sessionStorage.removeItem('line_code_verifier');
+  localStorage.removeItem(PKCE_STORAGE_KEY);
 }

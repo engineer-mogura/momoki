@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -130,8 +129,7 @@ function formatSessionStartedAt(startedAt: string): string {
 // --- Component ---
 
 export default function AdminPage() {
-  const router = useRouter();
-  const { user, isLoading: isAuthLoading } = useAuth();
+  const { user, isLoading: isAuthLoading, logout } = useAuth();
   const [visits, setVisits] = useState<AdminVisit[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [date, setDate] = useState(todayString());
@@ -139,6 +137,8 @@ export default function AdminPage() {
   const [sessionAction, setSessionAction] = useState<'start' | 'end' | null>(null);
   const [isSessionUpdating, setIsSessionUpdating] = useState(false);
   const [activeColumn, setActiveColumn] = useState<VisitStatus>('seated');
+  const [adminPing, setAdminPing] = useState<{ status: number; body: unknown } | null>(null);
+  const [isAdminPingLoading, setIsAdminPingLoading] = useState(false);
 
   const intervalRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
@@ -159,26 +159,18 @@ export default function AdminPage() {
     done: doneRef,
   };
 
-  // Auth guard
-  useEffect(() => {
-    if (isAuthLoading) return;
-    if (!user) {
-      router.replace('/');
-    } else if (!user.is_admin) {
-      router.replace('/admin/setup');
-    }
-  }, [isAuthLoading, user, router]);
-
   const fetchCurrentSession = useCallback(async () => {
+    if (!user?.is_admin) return;
     try {
       const response = await api.get<CurrentSessionResponse>('/api/admin/business-sessions/current');
       setSession(response.session);
     } catch (err) {
       console.error('Failed to fetch business session:', err);
     }
-  }, []);
+  }, [user?.is_admin]);
 
   const fetchVisits = useCallback(async () => {
+    if (!user?.is_admin) return;
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     try {
@@ -193,7 +185,7 @@ export default function AdminPage() {
       inFlightRef.current = false;
       setIsLoading(false);
     }
-  }, []);
+  }, [user?.is_admin]);
 
   // Polling: 2-second interval with visibility & inFlight guards
   useEffect(() => {
@@ -231,6 +223,7 @@ export default function AdminPage() {
 
   // Re-fetch when date changes + reset scroll
   useEffect(() => {
+    if (!user?.is_admin) return;
     setIsLoading(true);
     fetchVisits();
     // Reset scroll to first column
@@ -238,7 +231,7 @@ export default function AdminPage() {
       boardContainerRef.current.scrollTo({ left: 0 });
     }
     setActiveColumn('seated');
-  }, [date, fetchVisits]);
+  }, [date, fetchVisits, user?.is_admin]);
 
   // IntersectionObserver to track active column
   useEffect(() => {
@@ -355,7 +348,7 @@ export default function AdminPage() {
     }
   };
 
-  if (isAuthLoading || isLoading) {
+  if (isAuthLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
@@ -363,7 +356,120 @@ export default function AdminPage() {
     );
   }
 
-  if (!user?.is_admin) return null;
+  // --- Unauthenticated ---
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-900 px-4">
+        <div className="bg-white w-full max-w-md rounded-xl border border-slate-200 shadow-sm p-6 text-center">
+          <h1 className="text-lg font-bold mb-2">管理画面</h1>
+          <p className="text-sm text-slate-600 mb-6">
+            管理画面を利用するには、LINEでログインしてください。
+          </p>
+          <Link
+            href="/admin/auth/line/start"
+            className="inline-flex items-center justify-center w-full bg-[#00B900] hover:bg-[#00a000] text-white font-semibold py-3 px-4 rounded-lg transition"
+          >
+            LINEでログイン
+          </Link>
+          <Link
+            href="/"
+            className="inline-flex items-center justify-center w-full mt-3 text-sm text-slate-500 hover:text-slate-900 transition"
+          >
+            トップへ戻る
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Authenticated but not admin ---
+  if (!user.is_admin) {
+    const handlePing = async () => {
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL;
+      if (!baseUrl) {
+        setAdminPing({ status: 0, body: { error: 'NEXT_PUBLIC_API_BASE_URL is not set' } });
+        return;
+      }
+
+      const token =
+        (typeof window !== 'undefined' && (localStorage.getItem('momoki_token') || localStorage.getItem('auth_token'))) ||
+        null;
+
+      setIsAdminPingLoading(true);
+      setAdminPing(null);
+      try {
+        const res = await fetch(`${baseUrl}/api/admin/business-sessions/current`, {
+          headers: {
+            Accept: 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        const text = await res.text();
+        let body: unknown = text;
+        try {
+          body = text ? JSON.parse(text) : null;
+        } catch {
+          // keep as text
+        }
+        setAdminPing({ status: res.status, body });
+      } catch (e) {
+        setAdminPing({ status: 0, body: { error: e instanceof Error ? e.message : 'Request failed' } });
+      } finally {
+        setIsAdminPingLoading(false);
+      }
+    };
+
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-900 px-4">
+        <div className="bg-white w-full max-w-md rounded-xl border border-slate-200 shadow-sm p-6 text-center">
+          <h1 className="text-lg font-bold mb-2">管理画面</h1>
+          <p className="text-sm text-slate-600 mb-6">
+            管理画面の利用には管理者権限が必要です。招待コードを入力してください。
+          </p>
+          <Link
+            href="/admin/setup"
+            className="inline-flex items-center justify-center w-full bg-primary-600 hover:bg-primary-700 text-white font-semibold py-3 px-4 rounded-lg transition"
+          >
+            管理者セットアップへ
+          </Link>
+          <button
+            onClick={() => logout()}
+            className="w-full mt-3 text-sm text-slate-500 hover:text-slate-900 transition"
+          >
+            ログアウト
+          </button>
+
+          <div className="mt-6 text-left">
+            <p className="text-xs font-semibold text-slate-700 mb-2">接続確認（Bearerでadmin API）</p>
+            <button
+              onClick={handlePing}
+              disabled={isAdminPingLoading}
+              className="w-full bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-800 text-xs font-semibold py-2 rounded-lg transition"
+            >
+              {isAdminPingLoading ? '確認中...' : 'GET /api/admin/business-sessions/current'}
+            </button>
+            {adminPing && (
+              <div className="mt-2 text-xs">
+                <div className="text-slate-600 mb-1">status: {adminPing.status || 'error'}</div>
+                <pre className="bg-slate-50 border border-slate-200 rounded p-2 overflow-auto max-h-40">
+                  {typeof adminPing.body === 'string' ? adminPing.body : JSON.stringify(adminPing.body, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Admin board loading ---
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -374,7 +480,12 @@ export default function AdminPage() {
             <Link href="/" className="text-xl font-bold text-slate-900">
               伝票ボード
             </Link>
-            <div className="w-20"></div>
+            <button
+              onClick={() => logout()}
+              className="text-xs text-slate-500 hover:text-slate-900 transition"
+            >
+              ログアウト
+            </button>
           </div>
         </div>
       </header>
