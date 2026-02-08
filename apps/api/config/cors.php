@@ -16,8 +16,15 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => explode(',', env('CORS_ALLOWED_ORIGINS', 'http://localhost:3000')),
+    'allowed_origins' => array_values(array_unique(array_filter(array_merge(
+        array_map('trim', explode(',', env('CORS_ALLOWED_ORIGINS', 'http://localhost:3000'))),
+        [
+            // Vercel production (exact match)
+            'https://momoki.vercel.app',
+        ]
+    ), fn ($v) => $v !== '')))),
 
+    // 本番だけ確実に通す（patterns は一旦使わない）
     'allowed_origins_patterns' => [],
 
     'allowed_headers' => ['*'],
