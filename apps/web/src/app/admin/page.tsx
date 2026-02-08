@@ -724,25 +724,25 @@ export default function AdminPage() {
             <div>
               {isHistoryMode ? (
                 <>
-                  <p className="text-sm font-semibold text-slate-700">履歴表示</p>
-                  <p className="text-xs text-slate-600">
+                  <p className="text-lg md:text-sm leading-relaxed md:leading-normal font-semibold text-slate-700">履歴表示</p>
+                  <p className="text-base md:text-xs leading-relaxed md:leading-normal text-slate-600">
                     営業日: {date}
                     {session?.started_at ? ` / 開始: ${formatSessionStartedAt(session.started_at)}` : ''}
                   </p>
-                  <p className="text-xs text-slate-500">履歴閲覧中（操作はできません）</p>
+                  <p className="text-base md:text-xs leading-relaxed md:leading-normal text-slate-500">履歴閲覧中（操作はできません）</p>
                 </>
               ) : session ? (
                 <>
-                  <p className="text-sm font-semibold text-emerald-700">営業中</p>
-                  <p className="text-xs text-slate-600">
+                  <p className="text-lg md:text-sm leading-relaxed md:leading-normal font-semibold text-emerald-700">営業中</p>
+                  <p className="text-base md:text-xs leading-relaxed md:leading-normal text-slate-600">
                     営業日: {session.business_date} / 開始: {formatSessionStartedAt(session.started_at)}
                   </p>
-                  <p className="text-xs text-slate-500">現在営業中の営業セッションを表示中</p>
+                  <p className="text-base md:text-xs leading-relaxed md:leading-normal text-slate-500">現在営業中の営業セッションを表示中</p>
                 </>
               ) : (
                 <>
-                  <p className="text-sm font-semibold text-slate-700">営業未開始</p>
-                  <p className="text-xs text-slate-500">営業開始後、注文は営業セッションに紐づきます。</p>
+                  <p className="text-lg md:text-sm leading-relaxed md:leading-normal font-semibold text-slate-700">営業未開始</p>
+                  <p className="text-base md:text-xs leading-relaxed md:leading-normal text-slate-500">営業開始後、注文は営業セッションに紐づきます。</p>
                 </>
               )}
             </div>
@@ -1013,44 +1013,54 @@ function VisitCard({
   const canCancelOrders = !isDone && !isCheckout;
 
   return (
-    <div className="bg-white rounded-lg p-3 text-sm shadow-sm border border-slate-200">
-      {/* Header: table + user + NEW badge */}
+    <div className="bg-white rounded-lg p-3 text-base md:text-sm shadow-sm border border-slate-200">
+      {/* Header: table + user + NEW badge + 注文を見る + 履歴 */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded">
+          <span className="bg-blue-600 text-white text-sm md:text-xs font-bold px-2 py-0.5 rounded">
             {visit.table_number || '未設定'}
           </span>
           {visit.status === 'seated' && (
-            <span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-1.5 py-0.5 rounded">
+            <span className="bg-slate-100 text-slate-700 text-xs md:text-[10px] font-bold px-1.5 py-0.5 rounded">
               準備中
             </span>
           )}
-          <span className="text-slate-700 truncate max-w-[100px]">
+          <span className="text-slate-700 truncate max-w-[120px] md:max-w-[100px]">
             {visit.user.display_name || '不明'}
           </span>
           {visit.summary.has_new && (
-            <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded animate-pulse">
+            <span className="bg-red-500 text-white text-xs md:text-[10px] font-bold px-1.5 py-0.5 rounded animate-pulse">
               NEW {visit.summary.new_count}
             </span>
           )}
         </div>
-        <Link
-          href={`/admin/users/${visit.user.id}`}
-          className="text-slate-400 hover:text-primary-600 text-xs underline"
-        >
-          履歴
-        </Link>
+        <div className="flex items-center gap-3">
+          {visit.orders.length > 0 && (
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="text-sm md:text-xs text-primary-600 hover:text-primary-700 font-medium"
+            >
+              {expanded ? '閉じる' : `注文 (${visit.orders.length}件)`}
+            </button>
+          )}
+          <Link
+            href={`/admin/users/${visit.user.id}`}
+            className="text-slate-400 hover:text-primary-600 text-sm md:text-xs underline"
+          >
+            履歴
+          </Link>
+        </div>
       </div>
 
       {/* Time */}
       {visit.checked_in_at && (
-        <p className="text-xs text-slate-400 mb-2">
+        <p className="text-sm md:text-xs text-slate-400 mb-2">
           入店 {elapsedMinutes(visit.checked_in_at)}
         </p>
       )}
 
       {/* Summary */}
-      <div className="flex items-center justify-between text-xs mb-2">
+      <div className="flex items-center justify-between text-sm md:text-xs mb-2">
         <span className="text-slate-500">
           {visit.summary.order_count}件
         </span>
@@ -1060,84 +1070,76 @@ function VisitCard({
       </div>
 
       {/* Orders (collapsible) */}
-      {visit.orders.length > 0 && (
+      {visit.orders.length > 0 && expanded && (
         <div className="border-t border-slate-200 pt-2">
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-xs text-slate-500 hover:text-slate-900 mb-1"
-          >
-            {expanded ? '注文を閉じる' : `注文を見る (${visit.orders.length}件)`}
-          </button>
-          {expanded && (
-            <div className="space-y-2 mt-1">
-              {visit.orders.map((order) => {
-                const isNew = order.status === 'new';
-                const isServed = order.status === 'served';
-                const isCancelled = order.status === 'cancelled';
-                return (
-                  <div
-                    key={order.id}
-                    className={`bg-slate-50 rounded p-2 ${isCancelled ? 'opacity-40' : ''} ${isServed ? 'opacity-60' : ''}`}
-                  >
-                    <div className="flex justify-between items-center text-xs text-slate-500 mb-1">
-                      <span className="flex items-center gap-1">
-                        #{order.id}
-                        {isNew && (
-                          <span className="bg-red-500 text-white text-[10px] font-bold px-1 py-0.5 rounded">NEW</span>
-                        )}
-                        {isServed && (
-                          <span className="text-green-600 text-[10px]">提供済</span>
-                        )}
-                        {isCancelled && (
-                          <span className="text-red-500 text-[10px]">取消済</span>
-                        )}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <span>{new Date(order.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</span>
-                        {isNew && (
-                          <button
-                            onClick={() => setConfirmAction({ type: 'serve', orderId: order.id })}
-                            disabled={readOnly}
-                            className="text-green-600 hover:text-green-700 text-[10px] px-1 py-0.5 border border-green-300 rounded hover:border-green-400 transition"
-                          >
-                            提供済
-                          </button>
-                        )}
-                        {canCancelOrders && !isCancelled && (
-                          <button
-                            onClick={() => setConfirmAction({ type: 'cancel', orderId: order.id })}
-                            disabled={readOnly}
-                            className="text-red-500 hover:text-red-600 text-[10px] px-1 py-0.5 border border-red-300 rounded hover:border-red-400 transition"
-                          >
-                            削除
-                          </button>
-                        )}
-                      </div>
+          <div className="space-y-2 mt-1">
+            {visit.orders.map((order) => {
+              const isNew = order.status === 'new';
+              const isServed = order.status === 'served';
+              const isCancelled = order.status === 'cancelled';
+              return (
+                <div
+                  key={order.id}
+                  className={`bg-slate-50 rounded p-2 ${isCancelled ? 'opacity-40' : ''} ${isServed ? 'opacity-60' : ''}`}
+                >
+                  <div className="flex justify-between items-center text-sm md:text-xs text-slate-500 mb-1">
+                    <span className="flex items-center gap-1">
+                      #{order.id}
+                      {isNew && (
+                        <span className="bg-red-500 text-white text-xs md:text-[10px] font-bold px-1 py-0.5 rounded">NEW</span>
+                      )}
+                      {isServed && (
+                        <span className="text-green-600 text-xs md:text-[10px]">提供済</span>
+                      )}
+                      {isCancelled && (
+                        <span className="text-red-500 text-xs md:text-[10px]">取消済</span>
+                      )}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <span>{new Date(order.created_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</span>
+                      {isNew && (
+                        <button
+                          onClick={() => setConfirmAction({ type: 'serve', orderId: order.id })}
+                          disabled={readOnly}
+                          className="text-green-600 hover:text-green-700 text-xs md:text-[10px] px-1 py-0.5 border border-green-300 rounded hover:border-green-400 transition"
+                        >
+                          提供済
+                        </button>
+                      )}
+                      {canCancelOrders && !isCancelled && (
+                        <button
+                          onClick={() => setConfirmAction({ type: 'cancel', orderId: order.id })}
+                          disabled={readOnly}
+                          className="text-red-500 hover:text-red-600 text-xs md:text-[10px] px-1 py-0.5 border border-red-300 rounded hover:border-red-400 transition"
+                        >
+                          削除
+                        </button>
+                      )}
                     </div>
-                    {order.items.map((item) => (
-                      <div key={item.id} className={`flex justify-between text-xs ${isCancelled ? 'line-through' : ''}`}>
-                        <span className="text-slate-700">{item.name} x{item.quantity}</span>
-                        <span className="text-slate-500">
-                          &yen;{(item.unit_price * item.quantity).toLocaleString()}
-                        </span>
-                      </div>
-                    ))}
                   </div>
-                );
-              })}
-              {(isDone || isCheckout) && (
-                <p className="text-[10px] text-slate-400 mt-1">
-                  {isDone ? '会計済みのため取消不可（提供中に戻してください）' : '会計中のため取消不可'}
-                </p>
-              )}
-            </div>
-          )}
+                  {order.items.map((item) => (
+                    <div key={item.id} className={`flex justify-between text-sm md:text-xs ${isCancelled ? 'line-through' : ''}`}>
+                      <span className="text-slate-700">{item.name} x{item.quantity}</span>
+                      <span className="text-slate-500">
+                        &yen;{(item.unit_price * item.quantity).toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+            {(isDone || isCheckout) && (
+              <p className="text-xs md:text-[10px] text-slate-400 mt-1">
+                {isDone ? '会計済みのため取消不可（提供中に戻してください）' : '会計中のため取消不可'}
+              </p>
+            )}
+          </div>
         </div>
       )}
 
       {/* Status buttons */}
       {!readOnly && (
-        <div className="flex gap-1 mt-2">
+        <div className="flex flex-col gap-2 mt-3">
           {prev && (
             <button
               onClick={() => {
@@ -1147,7 +1149,7 @@ function VisitCard({
                   onStatusChange(visit.id, prev);
                 }
               }}
-              className={`flex-none text-xs py-1.5 px-2 rounded transition ${
+              className={`w-full text-sm md:text-xs min-h-[44px] md:min-h-0 py-2 md:py-1.5 px-2 rounded-lg md:rounded transition ${
                 isDone
                   ? 'bg-red-600 hover:bg-red-700 text-white'
                   : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
@@ -1159,7 +1161,7 @@ function VisitCard({
           {next && (
             <button
               onClick={() => onStatusChange(visit.id, next)}
-              className="flex-1 bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold py-1.5 px-2 rounded transition"
+              className="w-full bg-primary-600 hover:bg-primary-700 text-white text-sm md:text-xs font-semibold min-h-[48px] md:min-h-0 py-3 md:py-1.5 px-2 rounded-lg md:rounded transition"
             >
               {NEXT_LABEL[uiStatus]}
             </button>
