@@ -23,4 +23,4 @@ RUN mkdir -p bootstrap/cache storage/framework/cache storage/framework/sessions 
   && chmod -R 777 bootstrap/cache storage
 
 EXPOSE 8080
-CMD /bin/sh -lc 'set -eux; echo "BOOT PORT=${PORT:-8080}"; ls -la; ls -la public; php -S 0.0.0.0:${PORT:-8080} -t public'
+CMD ["php", "-S", "0.0.0.0:8080", "-t", "public"]
