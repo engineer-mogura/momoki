@@ -44,7 +44,7 @@ interface UserHistory {
 }
 
 const VISIT_STATUS_LABELS: Record<string, string> = {
-  seated: '着席',
+  seated: '準備中',
   serving: '提供中',
   checkout: '会計',
   done: '完了',

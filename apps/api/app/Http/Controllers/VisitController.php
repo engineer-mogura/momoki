@@ -35,7 +35,7 @@ class VisitController extends Controller
             'store_id' => $request->store_id,
             'business_session_id' => $this->currentSessionId((int) $request->store_id),
             'table_number' => $request->table_number,
-            'status' => Visit::STATUS_SEATED,
+            'status' => Visit::STATUS_SERVING,
             'checked_in_at' => now(),
         ]);
 

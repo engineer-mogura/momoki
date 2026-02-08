@@ -81,7 +81,6 @@ const NEXT_STATUS: Partial<Record<VisitStatus, VisitStatus>> = {
 };
 
 const PREV_STATUS: Partial<Record<VisitStatus, VisitStatus>> = {
-  serving: 'seated',
   checkout: 'serving',
   done: 'checkout',
 };
@@ -93,7 +92,6 @@ const NEXT_LABEL: Partial<Record<VisitStatus, string>> = {
 };
 
 const PREV_LABEL: Partial<Record<VisitStatus, string>> = {
-  serving: '着席に戻す',
   checkout: '提供中に戻す',
   done: '会計を取り消す',
 };
@@ -156,6 +154,8 @@ export default function AdminPage() {
   const [sessionAction, setSessionAction] = useState<'start' | 'end' | null>(null);
   const [isSessionUpdating, setIsSessionUpdating] = useState(false);
   const [activeColumn, setActiveColumn] = useState<VisitStatus>('serving');
+  const activeColumnRef = useRef<VisitStatus>('serving');
+  activeColumnRef.current = activeColumn;
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
@@ -168,6 +168,8 @@ export default function AdminPage() {
   const inFlightRef = useRef(false);
   const dateRef = useRef(date);
   dateRef.current = date;
+  const initialFetchDoneRef = useRef(false);
+  const scrollRafRef = useRef<number | null>(null);
 
   const isUnauthenticatedError = useCallback((err: unknown): boolean => {
     const anyErr = err as any;
@@ -360,6 +362,62 @@ export default function AdminPage() {
     [user?.is_admin, sessionExpired, handleUnauthenticated, isDateReady, isUnauthenticatedError]
   );
 
+  // Initial fetch once (auto-refresh OFF is kept)
+  useEffect(() => {
+    if (isAuthLoading || !user?.is_admin) return;
+    if (!isDateReady) return;
+    if (sessionExpired) return;
+    if (initialFetchDoneRef.current) return;
+    initialFetchDoneRef.current = true;
+    refreshVisits({ showSpinner: true });
+  }, [isAuthLoading, user?.is_admin, isDateReady, sessionExpired, refreshVisits]);
+
+  // Swipe-follow: update activeColumn based on scroll position (most reliable)
+  const handleBoardScroll = useCallback(() => {
+    const container = boardContainerRef.current;
+    if (!container) return;
+
+    if (scrollRafRef.current) {
+      window.cancelAnimationFrame(scrollRafRef.current);
+    }
+
+    scrollRafRef.current = window.requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+
+      // Only meaningful when horizontally scrollable (mobile)
+      if (container.scrollWidth <= container.clientWidth + 1) return;
+
+      const center = container.scrollLeft + container.clientWidth / 2;
+      const keys: VisitStatus[] = ['serving', 'checkout', 'done'];
+      let best: VisitStatus | null = null;
+      let bestDist = Number.POSITIVE_INFINITY;
+
+      keys.forEach((k) => {
+        const el = columnRefs[k]?.current;
+        if (!el) return;
+        const laneCenter = el.offsetLeft + el.clientWidth / 2;
+        const dist = Math.abs(laneCenter - center);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = k;
+        }
+      });
+
+      if (best && best !== activeColumnRef.current) {
+        setActiveColumn(best);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (scrollRafRef.current) {
+        window.cancelAnimationFrame(scrollRafRef.current);
+        scrollRafRef.current = null;
+      }
+    };
+  }, []);
+
   // Auto refresh (optional): 15s interval, only when visible
   useEffect(() => {
     if (isAuthLoading || !user?.is_admin) return;
@@ -411,40 +469,6 @@ export default function AdminPage() {
     }
     if (autoRefreshEnabled && document.visibilityState === 'visible') refreshVisits();
   }, [date, user?.is_admin, autoRefreshEnabled, refreshVisits, isHistoryMode, isDateReady]);
-
-  // IntersectionObserver to track active column
-  useEffect(() => {
-    if (!boardContainerRef.current) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        let maxRatio = 0;
-        let mostVisible: VisitStatus | null = null;
-
-        entries.forEach((entry) => {
-          if (entry.intersectionRatio > maxRatio) {
-            maxRatio = entry.intersectionRatio;
-            const key = entry.target.getAttribute('data-column') as VisitStatus;
-            if (key) mostVisible = key;
-          }
-        });
-
-        if (mostVisible && maxRatio > 0.3) {
-          setActiveColumn(mostVisible);
-        }
-      },
-      {
-        root: boardContainerRef.current,
-        threshold: [0, 0.3, 0.5, 0.7, 1],
-      }
-    );
-
-    Object.values(columnRefs).forEach((ref) => {
-      if (ref.current) observer.observe(ref.current);
-    });
-
-    return () => observer.disconnect();
-  }, []);
 
   const handleUpdateStatus = async (visitId: number, newStatus: VisitStatus) => {
     try {
@@ -867,51 +891,52 @@ export default function AdminPage() {
         </div>
 
         {/* Board - horizontal scroll */}
-        <div ref={boardContainerRef} className="px-2 py-4 overflow-x-auto">
-          <div className="flex gap-3 min-w-[680px]">
-            {BOARD_COLUMNS.map((col) => {
-              const colVisits = visits.filter((v: AdminVisit) =>
-                col.key === 'serving' ? v.status === 'serving' || v.status === 'seated' : v.status === col.key
-              );
-              return (
-                <div
-                  key={col.key}
-                  ref={columnRefs[col.key]}
-                  data-column={col.key}
-                  className="flex-1 min-w-[220px]"
-                >
-                  {/* Column header */}
-                  <div className={`border-t-4 ${col.color} bg-white rounded-t-lg px-3 py-2 mb-2 shadow-sm`}>
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-sm text-slate-900">{col.label}</span>
-                      <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">
-                        {colVisits.length}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Cards */}
-                  <div className="space-y-2">
-                    {colVisits.map((visit: AdminVisit) => (
-                      <VisitCard
-                        key={visit.id}
-                        visit={visit}
-                        readOnly={isHistoryMode}
-                        onStatusChange={handleUpdateStatus}
-                        onServeOrder={handleServeOrder}
-                        onCancelOrder={handleCancelOrder}
-                      />
-                    ))}
-                    {colVisits.length === 0 && (
-                      <div className="text-center py-8 text-slate-400 text-sm">
-                        なし
-                      </div>
-                    )}
+        <div
+          ref={boardContainerRef}
+          onScroll={handleBoardScroll}
+          className="px-3 py-4 overflow-x-auto md:overflow-visible flex md:grid md:grid-cols-3 gap-4 md:gap-3 snap-x snap-mandatory md:snap-none [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={{ WebkitOverflowScrolling: 'touch' }}
+        >
+          {BOARD_COLUMNS.map((col) => {
+            const colVisits = visits.filter((v: AdminVisit) =>
+              col.key === 'serving' ? v.status === 'serving' || v.status === 'seated' : v.status === col.key
+            );
+            return (
+              <div
+                key={col.key}
+                ref={columnRefs[col.key]}
+                data-column={col.key}
+                className="flex-none w-[min(92vw,420px)] md:w-auto md:flex-1 md:min-w-0 snap-start"
+              >
+                {/* Column header */}
+                <div className={`border-t-4 ${col.color} bg-white rounded-t-lg px-3 py-2 mb-2 shadow-sm`}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm text-slate-900">{col.label}</span>
+                    <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">
+                      {colVisits.length}
+                    </span>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+
+                {/* Cards */}
+                <div className="space-y-2">
+                  {colVisits.map((visit: AdminVisit) => (
+                    <VisitCard
+                      key={visit.id}
+                      visit={visit}
+                      readOnly={isHistoryMode}
+                      onStatusChange={handleUpdateStatus}
+                      onServeOrder={handleServeOrder}
+                      onCancelOrder={handleCancelOrder}
+                    />
+                  ))}
+                  {colVisits.length === 0 && (
+                    <div className="text-center py-8 text-slate-400 text-sm">なし</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {sessionAction && (
@@ -978,10 +1003,13 @@ function VisitCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ type: 'serve' | 'cancel' | 'reopen'; orderId?: number } | null>(null);
-  const next = NEXT_STATUS[visit.status];
-  const prev = PREV_STATUS[visit.status];
-  const isDone = visit.status === 'done';
-  const isCheckout = visit.status === 'checkout';
+  // UI policy: hide "seated" from admin UI completely.
+  // If a visit is seated, treat it as "serving" for display & actions.
+  const uiStatus: VisitStatus = visit.status === 'seated' ? 'serving' : visit.status;
+  const next = NEXT_STATUS[uiStatus];
+  const prev = PREV_STATUS[uiStatus];
+  const isDone = uiStatus === 'done';
+  const isCheckout = uiStatus === 'checkout';
   const canCancelOrders = !isDone && !isCheckout;
 
   return (
@@ -994,7 +1022,7 @@ function VisitCard({
           </span>
           {visit.status === 'seated' && (
             <span className="bg-slate-100 text-slate-700 text-[10px] font-bold px-1.5 py-0.5 rounded">
-              着席
+              準備中
             </span>
           )}
           <span className="text-slate-700 truncate max-w-[100px]">
@@ -1125,7 +1153,7 @@ function VisitCard({
                   : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
               }`}
             >
-              {PREV_LABEL[visit.status]}
+              {PREV_LABEL[uiStatus]}
             </button>
           )}
           {next && (
@@ -1133,7 +1161,7 @@ function VisitCard({
               onClick={() => onStatusChange(visit.id, next)}
               className="flex-1 bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold py-1.5 px-2 rounded transition"
             >
-              {NEXT_LABEL[visit.status]}
+              {NEXT_LABEL[uiStatus]}
             </button>
           )}
         </div>

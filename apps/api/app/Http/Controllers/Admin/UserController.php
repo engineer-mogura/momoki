@@ -26,7 +26,7 @@ class UserController extends Controller
             'visits' => $visits->map(fn($visit) => [
                 'id' => $visit->id,
                 'table_number' => $visit->table_number,
-                'status' => $visit->status ?? 'seated',
+                'status' => $visit->status ?? 'serving',
                 'checked_in_at' => $visit->checked_in_at?->toIso8601String(),
                 'summary' => [
                     'order_count' => $visit->orders->count(),

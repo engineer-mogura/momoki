@@ -102,7 +102,7 @@ class VisitController extends Controller
             'id' => $visit->id,
             'table_number' => $visit->table_number,
             'checked_in_at' => $visit->checked_in_at?->toIso8601String(),
-            'status' => $visit->status ?? 'seated',
+            'status' => $visit->status ?? 'serving',
             'user' => [
                 'id' => $visit->user->id,
                 'display_name' => $visit->user->display_name,

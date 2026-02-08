@@ -11,13 +11,15 @@ class Visit extends Model
 {
     use HasFactory;
 
+    /**
+     * @deprecated 管理UIからは着席を廃止。新規作成で使用しないこと。
+     */
     public const STATUS_SEATED = 'seated';
     public const STATUS_SERVING = 'serving';
     public const STATUS_CHECKOUT = 'checkout';
     public const STATUS_DONE = 'done';
 
     public const STATUSES = [
-        self::STATUS_SEATED,
         self::STATUS_SERVING,
         self::STATUS_CHECKOUT,
         self::STATUS_DONE,

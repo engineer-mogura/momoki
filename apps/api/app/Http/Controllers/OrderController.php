@@ -119,7 +119,7 @@ class OrderController extends Controller
                 'user_id' => $user->id,
                 'store_id' => $storeId,
                 'business_session_id' => $this->currentSessionId($storeId),
-                'status' => Visit::STATUS_SEATED,
+                'status' => Visit::STATUS_SERVING,
                 'checked_in_at' => now(),
                 'table_number' => null,
             ]);
