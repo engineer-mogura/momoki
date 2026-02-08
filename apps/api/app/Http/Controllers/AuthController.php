@@ -20,17 +20,6 @@ class AuthController extends Controller
         $clientSecret = config('services.line.client_secret');
         $redirectUri = config('services.line.redirect_uri');
 
-        Log::info('lineCallback start', [
-            'has_code' => (bool) $request->input('code'),
-            'has_code_verifier' => (bool) $request->input('code_verifier'),
-            'redirect_uri' => $redirectUri,
-            'client_id' => $clientId,
-            'ip' => $request->ip(),
-            'user_agent' => $request->userAgent(),
-            'referer' => $request->header('referer'),
-            'origin' => $request->header('origin'),
-        ]);
-
         $request->validate([
             'code' => 'required|string',
             'code_verifier' => 'required|string', // PKCE
@@ -71,7 +60,8 @@ class AuthController extends Controller
         if (!$tokenResponse->successful()) {
             Log::warning('lineCallback token exchange failed', [
                 'status' => $tokenResponse->status(),
-                'body' => $tokenResponse->json(),
+                'error' => $tokenResponse->json('error'),
+                'error_description' => $tokenResponse->json('error_description'),
             ]);
             return response()->json([
                 'error' => 'Failed to exchange code for tokens',
@@ -98,7 +88,8 @@ class AuthController extends Controller
         if (!$verifyResponse->successful()) {
             Log::warning('lineCallback verify failed', [
                 'status' => $verifyResponse->status(),
-                'body' => $verifyResponse->json(),
+                'error' => $verifyResponse->json('error'),
+                'error_description' => $verifyResponse->json('error_description'),
             ]);
             return response()->json([
                 'error' => 'Failed to verify id_token',
@@ -111,7 +102,7 @@ class AuthController extends Controller
 
         if (!$lineSubject) {
             Log::warning('lineCallback missing sub', [
-                'profile' => $profile,
+                'profile_keys' => array_keys($profile),
             ]);
             return response()->json(['error' => 'No sub in id_token'], 400);
         }
@@ -133,7 +124,6 @@ class AuthController extends Controller
 
         Log::info('lineCallback success', [
             'user_id' => $user->id,
-            'display_name' => $user->display_name,
         ]);
 
         return response()->json([
