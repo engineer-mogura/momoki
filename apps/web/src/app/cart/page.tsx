@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useCart } from '@/hooks/useCart';
 import { useAuth } from '@/hooks/useAuth';
 import { api } from '@/lib/api';
+import { ModalPortal } from '@/components/ModalPortal';
 
 type PreviewItem = {
   menu_item_id: number;
@@ -285,7 +286,7 @@ export default function CartPage() {
 
       {/* Confirmation Modal */}
       {showConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <ModalPortal>
           <div className="bg-white rounded-lg p-6 w-full max-w-sm mx-4 shadow-xl">
             <h2 className="text-lg font-bold text-slate-900 mb-4">注文内容の確認</h2>
 
@@ -328,7 +329,7 @@ export default function CartPage() {
               キャンセル
             </button>
           </div>
-        </div>
+        </ModalPortal>
       )}
     </div>
   );

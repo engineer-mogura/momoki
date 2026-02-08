@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
+import { ModalPortal } from '@/components/ModalPortal';
 
 // --- Types ---
 
@@ -609,12 +610,7 @@ export default function AdminPage() {
         </div>
 
         {logoutConfirmOpen && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setLogoutConfirmOpen(false);
-            }}
-          >
+          <ModalPortal onOverlayClick={() => setLogoutConfirmOpen(false)}>
             <div className="bg-white rounded-lg p-5 w-full max-w-sm mx-4 shadow-xl">
               <h3 className="text-sm font-bold text-slate-900 mb-2">ログアウトしますか？</h3>
               <p className="text-xs text-slate-500 mb-4">再度ログインが必要になります。</p>
@@ -633,7 +629,7 @@ export default function AdminPage() {
                 </button>
               </div>
             </div>
-          </div>
+          </ModalPortal>
         )}
       </div>
     );
@@ -671,12 +667,7 @@ export default function AdminPage() {
       </header>
 
       {logoutConfirmOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setLogoutConfirmOpen(false);
-          }}
-        >
+        <ModalPortal onOverlayClick={() => setLogoutConfirmOpen(false)}>
           <div className="bg-white rounded-lg p-5 w-full max-w-sm mx-4 shadow-xl">
             <h3 className="text-sm font-bold text-slate-900 mb-2">ログアウトしますか？</h3>
             <p className="text-xs text-slate-500 mb-4">再度ログインが必要になります。</p>
@@ -695,7 +686,7 @@ export default function AdminPage() {
               </button>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* Body - with date nav + column jump */}
@@ -940,7 +931,7 @@ export default function AdminPage() {
         </div>
 
         {sessionAction && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <ModalPortal>
             <div className="bg-white rounded-lg p-5 w-full max-w-sm mx-4 shadow-xl">
               {sessionAction === 'start' ? (
                 <>
@@ -979,7 +970,7 @@ export default function AdminPage() {
                 キャンセル
               </button>
             </div>
-          </div>
+          </ModalPortal>
         )}
       </main>
     </div>
@@ -1171,7 +1162,7 @@ function VisitCard({
 
       {/* Confirmation Modal */}
       {confirmAction && !readOnly && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <ModalPortal>
           <div className="bg-white rounded-lg p-5 w-full max-w-xs mx-4 shadow-xl">
             {confirmAction.type === 'reopen' ? (
               <>
@@ -1226,7 +1217,7 @@ function VisitCard({
               キャンセル
             </button>
           </div>
-        </div>
+        </ModalPortal>
       )}
     </div>
   );
