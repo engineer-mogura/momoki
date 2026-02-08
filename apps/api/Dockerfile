@@ -17,10 +17,12 @@ WORKDIR /app
 COPY . .
 
 # ここで artisan が存在する状態になる
-RUN composer install --no-dev --prefer-dist --no-interaction --no-progress
+RUN composer install --no-dev --prefer-dist --no-interaction --no-progress --no-scripts
 
 RUN mkdir -p bootstrap/cache storage/framework/cache storage/framework/sessions storage/framework/views storage/logs \
   && chmod -R 777 bootstrap/cache storage
 
 EXPOSE 8080
-CMD php artisan serve --host=0.0.0.0 --port=${PORT:-8080}
+CMD php artisan package:discover --ansi \
+  && php artisan migrate --force \
+  && php artisan serve --host=0.0.0.0 --port=${PORT:-8080}
