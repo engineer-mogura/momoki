@@ -36,6 +36,68 @@ class OrderController extends Controller
     }
 
     /**
+     * Preview checkout availability & total (client-side CTA gating)
+     */
+    public function preview(Request $request): JsonResponse
+    {
+        $request->validate([
+            'items' => 'required|array|min:1',
+            'items.*.menu_item_id' => 'required|exists:menu_items,id',
+            'items.*.quantity' => 'required|integer|min:1|max:99',
+        ]);
+
+        $rawItems = collect($request->items);
+        $ids = $rawItems->pluck('menu_item_id')->unique()->values()->all();
+
+        $menuItems = MenuItem::query()
+            ->whereIn('id', $ids)
+            ->get()
+            ->keyBy('id');
+
+        $previewItems = [];
+        $total = 0;
+        $hasUnavailable = false;
+
+        foreach ($request->items as $item) {
+            $menuItemId = (int) $item['menu_item_id'];
+            $qty = (int) $item['quantity'];
+
+            /** @var MenuItem $menuItem */
+            $menuItem = $menuItems->get($menuItemId);
+            $orderable = $menuItem?->isOrderable() ?? false;
+
+            if (!$orderable) {
+                $hasUnavailable = true;
+            }
+
+            $price = (int) $menuItem->price;
+            $subtotal = $price * $qty;
+
+            $previewItems[] = [
+                'menu_item_id' => $menuItemId,
+                'name' => $menuItem->name,
+                'price' => $price,
+                'quantity' => $qty,
+                'subtotal' => $subtotal,
+                'is_orderable' => $orderable,
+            ];
+
+            if ($orderable) {
+                $total += $subtotal;
+            }
+        }
+
+        $canCheckout = !$hasUnavailable;
+
+        return response()->json([
+            'canCheckout' => $canCheckout,
+            'reason' => $canCheckout ? null : '提供停止の商品が含まれています。内容を見直してください。',
+            'total_amount' => $total,
+            'items' => $previewItems,
+        ]);
+    }
+
+    /**
      * Create a new order
      */
     public function store(Request $request): JsonResponse

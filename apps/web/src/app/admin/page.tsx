@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback, type RefObject } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -60,6 +61,8 @@ interface VisitsResponse {
 // --- Constants ---
 
 const AUTO_REFRESH_STORAGE_KEY = 'momoki_admin_auto_refresh';
+const SELECTED_DATE_STORAGE_KEY = 'admin_selected_business_date';
+const BUSINESS_DAY_START_HOUR = 21;
 
 const COLUMNS: { key: VisitStatus; label: string; color: string }[] = [
   { key: 'seated', label: '着席', color: 'border-blue-500' },
@@ -111,6 +114,19 @@ function todayString(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function isValidDateString(v: string | null): v is string {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
+function businessDateFromNowLocal(startHour: number): string {
+  const now = new Date();
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (now.getHours() < startHour) {
+    base.setDate(base.getDate() - 1);
+  }
+  return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`;
+}
+
 function shiftDate(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + days);
@@ -131,8 +147,11 @@ function formatSessionStartedAt(startedAt: string): string {
 
 export default function AdminPage() {
   const { user, isLoading: isAuthLoading, logout } = useAuth();
+  const searchParams = useSearchParams();
   const [visits, setVisits] = useState<AdminVisit[]>([]);
-  const [date, setDate] = useState(todayString());
+  const [date, setDate] = useState('');
+  const [isDateReady, setIsDateReady] = useState(false);
+  const [todayBusinessDate, setTodayBusinessDate] = useState<string | null>(null);
   const [session, setSession] = useState<BusinessSession | null>(null);
   const [sessionAction, setSessionAction] = useState<'start' | 'end' | null>(null);
   const [isSessionUpdating, setIsSessionUpdating] = useState(false);
@@ -150,14 +169,14 @@ export default function AdminPage() {
   const dateRef = useRef(date);
   dateRef.current = date;
 
-  const isUnauthenticatedError = (err: unknown): boolean => {
+  const isUnauthenticatedError = useCallback((err: unknown): boolean => {
     const anyErr = err as any;
     if (anyErr?.status === 401) return true;
     if (anyErr?.response?.status === 401) return true;
     const msg = anyErr?.message;
     if (typeof msg === 'string' && (msg.includes('Unauthenticated') || msg.includes('401'))) return true;
     return false;
-  };
+  }, []);
 
   const handleUnauthenticated = useCallback(() => {
     setSessionExpired(true);
@@ -193,6 +212,87 @@ export default function AdminPage() {
       // ignore
     }
   }, [autoRefreshEnabled]);
+
+  // Decide initial selected business date (avoid flicker)
+  useEffect(() => {
+    if (isAuthLoading || !user?.is_admin) return;
+    if (isDateReady) return;
+
+    let cancelled = false;
+
+    const decide = async () => {
+      // (3) open session override (most priority)
+      try {
+        const cur = await api.get<{ session: BusinessSession | null }>('/api/admin/business-sessions/current');
+        if (cancelled) return;
+        if (cur.session?.business_date) {
+          setSession(cur.session);
+          setDate(cur.session.business_date);
+          setTodayBusinessDate(cur.session.business_date);
+          setIsDateReady(true);
+          return;
+        }
+      } catch (err) {
+        if (isUnauthenticatedError(err)) {
+          handleUnauthenticated();
+          return;
+        }
+        // ignore and fallback
+      }
+
+      // (1) A: URL query ?date=YYYY-MM-DD
+      const queryDateRaw = searchParams.get('date');
+      const urlDate = isValidDateString(queryDateRaw) ? queryDateRaw : null;
+
+      // (1) B: localStorage last selected
+      let storedDate: string | null = null;
+      try {
+        const raw = localStorage.getItem(SELECTED_DATE_STORAGE_KEY);
+        storedDate = isValidDateString(raw) ? raw : null;
+      } catch {
+        // ignore
+      }
+
+      // (2) C: server business day (preferred) -> fallback to local calc
+      let businessDay: string | null = null;
+      try {
+        const res = await api.get<{ business_date: string }>('/api/admin/business-day');
+        if (cancelled) return;
+        businessDay = isValidDateString(res.business_date) ? res.business_date : null;
+      } catch {
+        // ignore
+      }
+      const fallbackBusinessDay = businessDay ?? businessDateFromNowLocal(BUSINESS_DAY_START_HOUR);
+
+      if (cancelled) return;
+      setTodayBusinessDate(fallbackBusinessDay);
+      setDate(urlDate ?? storedDate ?? fallbackBusinessDay);
+      setIsDateReady(true);
+    };
+
+    decide();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isAuthLoading,
+    user?.is_admin,
+    isDateReady,
+    searchParams,
+    isUnauthenticatedError,
+    handleUnauthenticated,
+  ]);
+
+  // Persist selected date
+  useEffect(() => {
+    if (!isDateReady) return;
+    if (!isValidDateString(date)) return;
+    try {
+      localStorage.setItem(SELECTED_DATE_STORAGE_KEY, date);
+    } catch {
+      // ignore
+    }
+  }, [date, isDateReady]);
 
   // Logout confirm: ESC to close
   useEffect(() => {
@@ -231,6 +331,7 @@ export default function AdminPage() {
   const refreshVisits = useCallback(
     async (opts?: { showSpinner?: boolean }) => {
       if (!user?.is_admin) return;
+      if (!isDateReady) return;
       if (sessionExpired) return;
       if (inFlightRef.current) return;
       if (document.visibilityState !== 'visible' && !opts?.showSpinner) return;
@@ -256,7 +357,7 @@ export default function AdminPage() {
         if (opts?.showSpinner) setIsRefreshing(false);
       }
     },
-    [user?.is_admin, sessionExpired, handleUnauthenticated]
+    [user?.is_admin, sessionExpired, handleUnauthenticated, isDateReady, isUnauthenticatedError]
   );
 
   // Auto refresh (optional): 15s interval, only when visible
@@ -264,6 +365,7 @@ export default function AdminPage() {
     if (isAuthLoading || !user?.is_admin) return;
     if (sessionExpired) return;
     if (isHistoryMode) return;
+    if (!isDateReady) return;
 
     if (!autoRefreshEnabled) {
       if (intervalRef.current) {
@@ -293,11 +395,12 @@ export default function AdminPage() {
         intervalRef.current = null;
       }
     };
-  }, [autoRefreshEnabled, isAuthLoading, refreshVisits, sessionExpired, user?.is_admin, isHistoryMode]);
+  }, [autoRefreshEnabled, isAuthLoading, refreshVisits, sessionExpired, user?.is_admin, isHistoryMode, isDateReady]);
 
   // Date changes: reset scroll only (no automatic fetch by default)
   useEffect(() => {
     if (!user?.is_admin) return;
+    if (!isDateReady) return;
     if (boardContainerRef.current) {
       boardContainerRef.current.scrollTo({ left: 0 });
     }
@@ -307,7 +410,7 @@ export default function AdminPage() {
       return;
     }
     if (autoRefreshEnabled && document.visibilityState === 'visible') refreshVisits();
-  }, [date, user?.is_admin, autoRefreshEnabled, refreshVisits, isHistoryMode]);
+  }, [date, user?.is_admin, autoRefreshEnabled, refreshVisits, isHistoryMode, isDateReady]);
 
   // IntersectionObserver to track active column
   useEffect(() => {
@@ -512,7 +615,18 @@ export default function AdminPage() {
     );
   }
 
-  // --- Admin board loading ---
+  // --- Date loading (business date resolve) ---
+  if (!isDateReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto mb-3"></div>
+          <p className="text-sm text-slate-600">営業日を準備中...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       {/* Header - simplified */}
@@ -613,7 +727,7 @@ export default function AdminPage() {
                 <button
                   onClick={() => {
                     setViewMode('live');
-                    setDate(todayString());
+                    setDate(todayBusinessDate ?? businessDateFromNowLocal(BUSINESS_DAY_START_HOUR));
                   }}
                   className="rounded-lg px-3 py-2 text-sm font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
                 >
@@ -698,8 +812,11 @@ export default function AdminPage() {
               前日
             </button>
             <button
-              onClick={() => setDate(todayString())}
-              disabled={(Boolean(session) && !isHistoryMode) || date === todayString()}
+              onClick={() => setDate(todayBusinessDate ?? businessDateFromNowLocal(BUSINESS_DAY_START_HOUR))}
+              disabled={
+                (Boolean(session) && !isHistoryMode) ||
+                date === (todayBusinessDate ?? businessDateFromNowLocal(BUSINESS_DAY_START_HOUR))
+              }
               className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 text-xs px-2 py-1.5 transition"
             >
               本日

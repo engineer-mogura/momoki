@@ -46,6 +46,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Orders
     Route::get('/orders', [OrderController::class, 'index']);
+    Route::post('/orders/preview', [OrderController::class, 'preview']);
     Route::post('/orders', [OrderController::class, 'store']);
     Route::get('/orders/{order}', [OrderController::class, 'show']);
 });
@@ -58,6 +59,7 @@ Route::prefix('admin')->middleware(['auth:sanctum'])->group(function () {
     // 以下は is_admin=true のみ
     Route::middleware([\App\Http\Middleware\EnsureIsAdmin::class])->group(function () {
         // Business session management
+        Route::get('/business-day', [AdminBusinessSessionController::class, 'businessDay']);
         Route::get('/business-sessions/current', [AdminBusinessSessionController::class, 'current']);
         Route::post('/business-sessions/start', [AdminBusinessSessionController::class, 'start']);
         Route::post('/business-sessions/end', [AdminBusinessSessionController::class, 'end']);

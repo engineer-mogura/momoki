@@ -8,6 +8,7 @@ use App\Models\Store;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class BusinessSessionController extends Controller
@@ -109,6 +110,41 @@ class BusinessSessionController extends Controller
         return response()->json([
             'message' => '営業を終了しました',
             'session' => $this->formatSession($session->fresh()),
+        ]);
+    }
+
+    /**
+     * Return "today's business date" in server truth.
+     * - If an open session exists, use its business_date
+     * - Otherwise compute by services.business_day.start in services.business_day.timezone
+     */
+    public function businessDay(): JsonResponse
+    {
+        $resolved = $this->resolveStoreId();
+        if ($resolved instanceof JsonResponse) {
+            return $resolved;
+        }
+        $storeId = $resolved;
+
+        $tz = config('services.business_day.timezone', 'Asia/Tokyo');
+        $businessStart = config('services.business_day.start', '21:00');
+
+        $open = BusinessSession::where('store_id', $storeId)
+            ->whereNull('ended_at')
+            ->first();
+
+        if ($open && $open->business_date) {
+            return response()->json([
+                'business_date' => $open->business_date->toDateString(),
+            ]);
+        }
+
+        $now = now($tz);
+        $todayStart = Carbon::parse($now->toDateString() . ' ' . $businessStart, $tz);
+        $businessDate = $now->lessThan($todayStart) ? $now->copy()->subDay()->toDateString() : $now->toDateString();
+
+        return response()->json([
+            'business_date' => $businessDate,
         ]);
     }
 

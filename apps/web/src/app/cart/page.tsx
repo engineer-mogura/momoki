@@ -1,19 +1,40 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCart } from '@/hooks/useCart';
 import { useAuth } from '@/hooks/useAuth';
 import { api } from '@/lib/api';
 
+type PreviewItem = {
+  menu_item_id: number;
+  name: string;
+  price: number;
+  quantity: number;
+  subtotal: number;
+  is_orderable: boolean;
+};
+
+type OrderPreview = {
+  canCheckout: boolean;
+  reason: string | null;
+  total_amount: number;
+  items: PreviewItem[];
+};
+
 export default function CartPage() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, isLoading: isAuthLoading } = useAuth();
   const { items, updateQuantity, removeItem, clearCart, totalAmount, isLoaded } = useCart();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [previewStatus, setPreviewStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [preview, setPreview] = useState<OrderPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [fadeInReady, setFadeInReady] = useState(false);
+  const requestSeqRef = useRef(0);
 
   const handleSubmitOrder = () => {
     if (!user) {
@@ -23,6 +44,66 @@ export default function CartPage() {
     if (items.length === 0) return;
     setShowConfirmModal(true);
   };
+
+  const fetchPreview = async () => {
+    if (!user) return;
+    if (items.length === 0) return;
+
+    const seq = ++requestSeqRef.current;
+    setPreviewStatus('loading');
+    setPreviewError(null);
+    setPreview(null);
+
+    try {
+      const res = await api.post<OrderPreview>('/api/orders/preview', {
+        items: items.map((item) => ({
+          menu_item_id: item.menuItem.id,
+          quantity: item.quantity,
+        })),
+      });
+      if (seq !== requestSeqRef.current) return;
+      setPreview(res);
+      setPreviewStatus('ready');
+    } catch (err) {
+      if (seq !== requestSeqRef.current) return;
+      setPreviewStatus('error');
+      setPreviewError(err instanceof Error ? err.message : '読み込みに失敗しました');
+    }
+  };
+
+  // Preview gating for CTA (avoid flicker)
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (isAuthLoading) return;
+
+    // Not logged in -> no preview call
+    if (!user) {
+      setPreviewStatus('idle');
+      setPreview(null);
+      setPreviewError(null);
+      return;
+    }
+
+    if (items.length === 0) {
+      setPreviewStatus('idle');
+      setPreview(null);
+      setPreviewError(null);
+      return;
+    }
+
+    fetchPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, isAuthLoading, user?.id, items]);
+
+  // Fade-in when "注文確定" becomes available
+  useEffect(() => {
+    if (previewStatus === 'ready' && preview?.canCheckout) {
+      setFadeInReady(false);
+      const t = window.setTimeout(() => setFadeInReady(true), 10);
+      return () => window.clearTimeout(t);
+    }
+    setFadeInReady(false);
+  }, [previewStatus, preview?.canCheckout]);
 
   const handleConfirmOrder = async () => {
     setIsSubmitting(true);
@@ -137,15 +218,67 @@ export default function CartPage() {
           <div className="container mx-auto">
             <div className="flex items-center justify-between mb-4">
               <span className="text-slate-500">合計</span>
-              <span className="text-2xl font-bold">&yen;{totalAmount.toLocaleString()}</span>
+              <span className="text-2xl font-bold">
+                &yen;{(preview?.total_amount ?? totalAmount).toLocaleString()}
+              </span>
             </div>
-            <button
-              onClick={handleSubmitOrder}
-              disabled={isSubmitting}
-              className="w-full bg-primary-600 hover:bg-primary-700 disabled:bg-slate-300 text-white font-semibold py-4 rounded-lg transition"
-            >
-              {isSubmitting ? '送信中...' : user ? '注文を確定する' : 'ログインして注文'}
-            </button>
+
+            {/* CTA: show only after API/auth result is determined */}
+            {isAuthLoading ? (
+              <button
+                disabled
+                className="w-full bg-slate-300 text-white font-semibold py-4 rounded-lg transition flex items-center justify-center gap-2"
+              >
+                <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                確認中...
+              </button>
+            ) : !user ? (
+              <button
+                onClick={handleSubmitOrder}
+                className="w-full bg-primary-600 hover:bg-primary-700 text-white font-semibold py-4 rounded-lg transition"
+              >
+                ログインして注文
+              </button>
+            ) : previewStatus === 'error' ? (
+              <div className="space-y-2">
+                <div className="text-sm text-red-600">読み込みに失敗しました</div>
+                <button
+                  onClick={fetchPreview}
+                  disabled={isSubmitting}
+                  className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-semibold py-4 rounded-lg transition"
+                >
+                  再読み込み
+                </button>
+                {previewError && <div className="text-xs text-slate-500">{previewError}</div>}
+              </div>
+            ) : previewStatus !== 'ready' ? (
+              <button
+                disabled
+                className="w-full bg-slate-300 text-white font-semibold py-4 rounded-lg transition flex items-center justify-center gap-2"
+              >
+                <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                確認中...
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <button
+                  onClick={handleSubmitOrder}
+                  disabled={isSubmitting || !preview?.canCheckout}
+                  className={`w-full font-semibold py-4 rounded-lg transition ${
+                    preview?.canCheckout
+                      ? `bg-primary-600 hover:bg-primary-700 text-white transition-opacity duration-200 ${
+                          fadeInReady ? 'opacity-100' : 'opacity-0'
+                        }`
+                      : 'bg-slate-300 text-white'
+                  }`}
+                >
+                  {isSubmitting ? '送信中...' : '注文を確定する'}
+                </button>
+                {!preview?.canCheckout && (
+                  <div className="text-xs text-slate-600">{preview?.reason || '現在は注文できません'}</div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -172,7 +305,7 @@ export default function CartPage() {
             <div className="border-t border-slate-200 pt-3 mb-4">
               <div className="flex justify-between font-bold">
                 <span>合計</span>
-                <span>&yen;{totalAmount.toLocaleString()}</span>
+                <span>&yen;{(preview?.total_amount ?? totalAmount).toLocaleString()}</span>
               </div>
             </div>
 
