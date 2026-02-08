@@ -19,10 +19,20 @@ function generateRandomString(length: number): string {
 
 // Generate code_challenge from code_verifier (PKCE)
 async function generateCodeChallenge(codeVerifier: string): Promise<string> {
+  // PKCE 生成はクライアント（ブラウザ）でのみ実行する
+  if (typeof window === 'undefined' || !window.crypto?.subtle) {
+    throw new Error('PKCE is only supported in browsers with crypto.subtle');
+  }
+
   const encoder = new TextEncoder();
   const data = encoder.encode(codeVerifier);
   const digest = await crypto.subtle.digest('SHA-256', data);
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(digest)));
+  const bytes = new Uint8Array(digest);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(binary);
   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
