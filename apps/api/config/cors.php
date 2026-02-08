@@ -1,5 +1,13 @@
 <?php
 
+$env = env('CORS_ALLOWED_ORIGINS', 'http://localhost:3000');
+$origins = array_map('trim', explode(',', $env));
+$origins = array_filter($origins, function ($v) {
+    return $v !== '';
+});
+$origins[] = 'https://momoki.vercel.app';
+$origins = array_values(array_unique($origins));
+
 return [
     /*
     |--------------------------------------------------------------------------
@@ -12,17 +20,11 @@ return [
     |
     */
 
-    'paths' => ['api/*', 'auth/*'],
+    'paths' => ['api/*'],
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => array_values(array_unique(array_filter(array_merge(
-        array_map('trim', explode(',', env('CORS_ALLOWED_ORIGINS', 'http://localhost:3000'))),
-        [
-            // Vercel production (exact match)
-            'https://momoki.vercel.app',
-        ]
-    ), fn ($v) => $v !== '')))),
+    'allowed_origins' => $origins,
 
     // 本番だけ確実に通す（patterns は一旦使わない）
     'allowed_origins_patterns' => [],
