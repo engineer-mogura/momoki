@@ -137,6 +137,7 @@ class VisitController extends Controller
             'business_date' => $session->business_date?->toDateString(),
             'started_at' => $session->started_at?->toIso8601String(),
             'ended_at' => $session->ended_at?->toIso8601String(),
+            'is_open' => $session->ended_at === null,
         ];
     }
 }

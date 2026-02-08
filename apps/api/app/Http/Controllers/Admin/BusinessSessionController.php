@@ -102,7 +102,7 @@ class BusinessSessionController extends Controller
         if (!$session) {
             return response()->json([
                 'message' => '営業中のセッションがありません',
-            ], 400);
+            ], 409);
         }
 
         $session->update(['ended_at' => now()]);
@@ -156,6 +156,7 @@ class BusinessSessionController extends Controller
             'business_date' => $session->business_date?->toDateString(),
             'started_at' => $session->started_at?->toIso8601String(),
             'ended_at' => $session->ended_at?->toIso8601String(),
+            'is_open' => $session->ended_at === null,
         ];
     }
 

@@ -51,6 +51,7 @@ interface BusinessSession {
   business_date: string;
   started_at: string;
   ended_at: string | null;
+  is_open?: boolean;
 }
 
 interface VisitsResponse {
@@ -152,6 +153,8 @@ export default function AdminPage() {
   const [isDateReady, setIsDateReady] = useState(false);
   const [todayBusinessDate, setTodayBusinessDate] = useState<string | null>(null);
   const [session, setSession] = useState<BusinessSession | null>(null);
+  // 営業中 = ended_at が null のセッションが存在する場合のみ
+  const isSessionActive = session !== null && session.ended_at === null;
   const [sessionAction, setSessionAction] = useState<'start' | 'end' | null>(null);
   const [isSessionUpdating, setIsSessionUpdating] = useState(false);
   const [activeColumn, setActiveColumn] = useState<VisitStatus>('serving');
@@ -722,7 +725,7 @@ export default function AdminPage() {
                   </p>
                   <p className="text-base md:text-xs leading-relaxed md:leading-normal text-slate-500">履歴閲覧中（操作はできません）</p>
                 </>
-              ) : session ? (
+              ) : isSessionActive ? (
                 <>
                   <p className="text-lg md:text-sm leading-relaxed md:leading-normal font-semibold text-emerald-700">営業中</p>
                   <p className="text-base md:text-xs leading-relaxed md:leading-normal text-slate-600">
@@ -762,15 +765,15 @@ export default function AdminPage() {
 
               {!isHistoryMode && (
                 <button
-                  onClick={() => setSessionAction(session ? 'end' : 'start')}
+                  onClick={() => setSessionAction(isSessionActive ? 'end' : 'start')}
                   disabled={isSessionUpdating}
                   className={`rounded-lg px-3 py-2 text-sm font-semibold text-white transition ${
-                    session
+                    isSessionActive
                       ? 'bg-red-600 hover:bg-red-700 disabled:opacity-50'
                       : 'bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50'
                   }`}
                 >
-                  {session ? '営業終了' : '営業開始'}
+                  {isSessionActive ? '営業終了' : '営業開始'}
                 </button>
               )}
             </div>
@@ -821,7 +824,7 @@ export default function AdminPage() {
           <div className="flex items-center gap-1 justify-center">
             <button
               onClick={() => setDate(shiftDate(date, -1))}
-              disabled={Boolean(session) && !isHistoryMode}
+              disabled={isSessionActive && !isHistoryMode}
               className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 text-xs px-2 py-1.5 rounded-l-lg transition"
             >
               前日
@@ -829,7 +832,7 @@ export default function AdminPage() {
             <button
               onClick={() => setDate(todayBusinessDate ?? businessDateFromNowLocal(BUSINESS_DAY_START_HOUR))}
               disabled={
-                (Boolean(session) && !isHistoryMode) ||
+                (isSessionActive && !isHistoryMode) ||
                 date === (todayBusinessDate ?? businessDateFromNowLocal(BUSINESS_DAY_START_HOUR))
               }
               className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 text-xs px-2 py-1.5 transition"
@@ -838,7 +841,7 @@ export default function AdminPage() {
             </button>
             <button
               onClick={() => setDate(shiftDate(date, 1))}
-              disabled={Boolean(session) && !isHistoryMode}
+              disabled={isSessionActive && !isHistoryMode}
               className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 text-xs px-2 py-1.5 rounded-r-lg transition"
             >
               翌日
@@ -846,7 +849,7 @@ export default function AdminPage() {
             <input
               type="date"
               value={date}
-              disabled={Boolean(session) && !isHistoryMode}
+              disabled={isSessionActive && !isHistoryMode}
               onChange={(e: { target: { value: string } }) => setDate(e.target.value)}
               className="bg-white text-slate-900 border border-slate-300 rounded-lg px-3 py-1.5 text-sm ml-2 focus:outline-none focus:ring-2 focus:ring-primary-600 disabled:opacity-40 disabled:cursor-not-allowed"
             />
