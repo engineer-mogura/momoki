@@ -5,6 +5,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { getStoredAuthParams, clearStoredAuthParams } from '@/lib/line';
 import { api, setAuthToken } from '@/lib/api';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default function LineLoginCallback() {
   const router = useRouter();
   const searchParams = useSearchParams();
