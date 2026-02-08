@@ -9,9 +9,6 @@ import { useCart } from '@/hooks/useCart';
 
 type TabType = 'drink' | 'bottle';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 export default function MenuPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
