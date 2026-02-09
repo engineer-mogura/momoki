@@ -110,31 +110,45 @@ class OrderController extends Controller
         ]);
 
         $user = $request->user();
+        $storeId = (int) config('services.store.default_store_id');
+
+        // 営業中セッションを取得（なければ注文不可）
+        $session = BusinessSession::where('store_id', $storeId)
+            ->whereNull('ended_at')
+            ->first();
+
+        if (!$session) {
+            return response()->json([
+                'error' => 'BUSINESS_NOT_OPEN',
+                'message' => '営業中ではないため注文できません',
+            ], 409);
+        }
+
         $visit = $user->currentVisit();
 
         // Auto check-in if no active visit
         if (!$visit) {
-            $storeId = (int) config('services.store.default_store_id');
             $visit = Visit::create([
                 'user_id' => $user->id,
                 'store_id' => $storeId,
-                'business_session_id' => $this->currentSessionId($storeId),
+                'business_session_id' => $session->id,
                 'status' => Visit::STATUS_SERVING,
                 'checked_in_at' => now(),
                 'table_number' => null,
             ]);
         } elseif (is_null($visit->business_session_id)) {
             $visit->update([
-                'business_session_id' => $this->currentSessionId((int) $visit->store_id),
+                'business_session_id' => $session->id,
             ]);
         }
 
-        $order = DB::transaction(function () use ($request, $user, $visit) {
+        $order = DB::transaction(function () use ($request, $user, $visit, $session) {
             // Create order
             $order = Order::create([
                 'visit_id' => $visit->id,
                 'user_id' => $user->id,
                 'store_id' => $visit->store_id,
+                'business_session_id' => $session->id,
                 'status' => Order::STATUS_NEW,
                 'notes' => $request->notes,
             ]);
@@ -212,10 +226,4 @@ class OrderController extends Controller
         ];
     }
 
-    private function currentSessionId(int $storeId): ?int
-    {
-        return BusinessSession::where('store_id', $storeId)
-            ->whereNull('ended_at')
-            ->value('id');
-    }
 }

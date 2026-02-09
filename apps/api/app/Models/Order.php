@@ -25,6 +25,7 @@ class Order extends Model
         'visit_id',
         'user_id',
         'store_id',
+        'business_session_id',
         'status',
         'total_amount',
         'notes',
@@ -37,6 +38,14 @@ class Order extends Model
         'served_at' => 'datetime',
         'cancelled_at' => 'datetime',
     ];
+
+    /**
+     * Get the business session for this order
+     */
+    public function businessSession(): BelongsTo
+    {
+        return $this->belongsTo(BusinessSession::class);
+    }
 
     /**
      * Get the visit for this order

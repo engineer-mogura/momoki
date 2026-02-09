@@ -64,8 +64,6 @@ interface VisitsResponse {
 
 const AUTO_REFRESH_STORAGE_KEY = 'momoki_admin_auto_refresh';
 const SELECTED_DATE_STORAGE_KEY = 'admin_selected_business_date';
-const BUSINESS_DAY_START_HOUR = 21;
-
 const COLUMNS: { key: VisitStatus; label: string; color: string }[] = [
   { key: 'seated', label: '着席', color: 'border-blue-500' },
   { key: 'serving', label: '提供中', color: 'border-yellow-500' },
@@ -118,15 +116,6 @@ function isValidDateString(v: string | null): v is string {
   return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 }
 
-function businessDateFromNowLocal(startHour: number): string {
-  const now = new Date();
-  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (now.getHours() < startHour) {
-    base.setDate(base.getDate() - 1);
-  }
-  return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`;
-}
-
 function shiftDate(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + days);
@@ -141,6 +130,15 @@ function formatSessionStartedAt(startedAt: string): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function getErrorMessage(err: unknown): string {
+  const anyErr = err as any;
+  const status = anyErr?.status ?? anyErr?.response?.status;
+  if (status === 401) return 'ログインが切れました。再ログインしてください。';
+  if (status === 409) return '状態が変更されています。更新ボタンで再取得してください。';
+  if (status === 422) return '入力内容に問題があります。';
+  return '通信エラーが発生しました。もう一度お試しください。';
 }
 
 // --- Component ---
@@ -167,11 +165,19 @@ export default function AdminPage() {
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'live' | 'history'>('live');
   const isHistoryMode = viewMode === 'history';
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [visitActionLoading, setVisitActionLoading] = useState<Record<number, string>>({});
+
+  // effectiveDate: single source of truth（これ以外で日付を参照しない）
+  // 履歴モード: ユーザー選択日付、通常モード(営業中): session日付、通常モード(未開始): 暦の今日
+  const effectiveDate = isHistoryMode
+    ? date
+    : (isSessionActive ? session!.business_date : todayString());
 
   const intervalRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
-  const dateRef = useRef(date);
-  dateRef.current = date;
+  const dateRef = useRef(effectiveDate);
+  dateRef.current = effectiveDate;
   const initialFetchDoneRef = useRef(false);
   const scrollRafRef = useRef<number | null>(null);
 
@@ -268,7 +274,7 @@ export default function AdminPage() {
       } catch {
         // ignore
       }
-      const fallbackBusinessDay = businessDay ?? businessDateFromNowLocal(BUSINESS_DAY_START_HOUR);
+      const fallbackBusinessDay = businessDay ?? todayString();
 
       if (cancelled) return;
       setTodayBusinessDate(fallbackBusinessDay);
@@ -310,6 +316,23 @@ export default function AdminPage() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [logoutConfirmOpen]);
 
+  // Session action modal: ESC to close (disabled during processing)
+  useEffect(() => {
+    if (!sessionAction) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSessionUpdating) setSessionAction(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [sessionAction, isSessionUpdating]);
+
+  // Error toast auto-dismiss
+  useEffect(() => {
+    if (!errorToast) return;
+    const timer = window.setTimeout(() => setErrorToast(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [errorToast]);
+
   // Entering history mode forces auto-refresh off (cost safe)
   useEffect(() => {
     if (!isHistoryMode) return;
@@ -319,6 +342,18 @@ export default function AdminPage() {
       intervalRef.current = null;
     }
   }, [isHistoryMode, autoRefreshEnabled]);
+
+  // 履歴モードに入った時、日付を現在の営業日で初期化
+  useEffect(() => {
+    if (!isHistoryMode) return;
+    setDate(session?.business_date ?? todayBusinessDate ?? todayString());
+  }, [isHistoryMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 通常モードに戻った時、date を基準日にリセット（履歴日付の持ち越し遮断）
+  useEffect(() => {
+    if (isHistoryMode) return;
+    setDate(isSessionActive && session ? session.business_date : todayString());
+  }, [isHistoryMode, isSessionActive, session?.business_date]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Column refs for scroll
   const boardContainerRef = useRef<HTMLDivElement>(null);
@@ -357,7 +392,7 @@ export default function AdminPage() {
           handleUnauthenticated();
           return;
         }
-        console.error('Failed to fetch visits:', err);
+        setErrorToast(getErrorMessage(err));
       } finally {
         inFlightRef.current = false;
         if (opts?.showSpinner) setIsRefreshing(false);
@@ -459,7 +494,7 @@ export default function AdminPage() {
     };
   }, [autoRefreshEnabled, isAuthLoading, refreshVisits, sessionExpired, user?.is_admin, isHistoryMode, isDateReady]);
 
-  // Date changes: reset scroll only (no automatic fetch by default)
+  // effectiveDate or mode changes: reset scroll and refresh
   useEffect(() => {
     if (!user?.is_admin) return;
     if (!isDateReady) return;
@@ -467,23 +502,23 @@ export default function AdminPage() {
       boardContainerRef.current.scrollTo({ left: 0 });
     }
     setActiveColumn('serving');
-    if (isHistoryMode) {
-      refreshVisits({ showSpinner: true });
-      return;
-    }
-    if (autoRefreshEnabled && document.visibilityState === 'visible') refreshVisits();
-  }, [date, user?.is_admin, autoRefreshEnabled, refreshVisits, isHistoryMode, isDateReady]);
+    refreshVisits({ showSpinner: true });
+  }, [effectiveDate, user?.is_admin, refreshVisits, isHistoryMode, isDateReady]);
 
   const handleUpdateStatus = async (visitId: number, newStatus: VisitStatus) => {
+    if (visitActionLoading[visitId]) return;
+    setVisitActionLoading((prev: Record<number, string>) => ({ ...prev, [visitId]: newStatus }));
     try {
       await api.patch(`/api/admin/visits/${visitId}/status`, { status: newStatus });
-      // Optimistic update
       setVisits((prev: AdminVisit[]) =>
         prev.map((v: AdminVisit) => (v.id === visitId ? { ...v, status: newStatus } : v))
       );
       refreshVisits();
     } catch (err) {
-      console.error('Failed to update visit status:', err);
+      if (isUnauthenticatedError(err)) { handleUnauthenticated(); return; }
+      setErrorToast(getErrorMessage(err));
+    } finally {
+      setVisitActionLoading((prev: Record<number, string>) => { const next = { ...prev }; delete next[visitId]; return next; });
     }
   };
 
@@ -510,7 +545,8 @@ export default function AdminPage() {
         })
       );
     } catch (err) {
-      console.error('Failed to serve order:', err);
+      if (isUnauthenticatedError(err)) { handleUnauthenticated(); return; }
+      setErrorToast(getErrorMessage(err));
     }
   };
 
@@ -526,7 +562,8 @@ export default function AdminPage() {
         })
       );
     } catch (err) {
-      console.error('Failed to cancel order:', err);
+      if (isUnauthenticatedError(err)) { handleUnauthenticated(); return; }
+      setErrorToast(getErrorMessage(err));
     }
   };
 
@@ -536,7 +573,8 @@ export default function AdminPage() {
       await api.post(`/api/admin/business-sessions/${action}`);
       await refreshVisits({ showSpinner: false });
     } catch (err) {
-      console.error(`Failed to ${action} business session:`, err);
+      if (isUnauthenticatedError(err)) { handleUnauthenticated(); return; }
+      setErrorToast(getErrorMessage(err));
     } finally {
       setIsSessionUpdating(false);
       setSessionAction(null);
@@ -692,6 +730,14 @@ export default function AdminPage() {
         </ModalPortal>
       )}
 
+      {/* Error toast */}
+      {errorToast && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white px-4 py-3 rounded-lg shadow-lg max-w-sm w-[calc(100%-2rem)] text-sm font-medium flex items-center justify-between">
+          <span>{errorToast}</span>
+          <button onClick={() => setErrorToast(null)} className="ml-3 text-white/80 hover:text-white flex-shrink-0">&times;</button>
+        </div>
+      )}
+
       {/* Body - with date nav + column jump */}
       <main className="pb-4">
         {sessionExpired && (
@@ -744,8 +790,8 @@ export default function AdminPage() {
               {isHistoryMode ? (
                 <button
                   onClick={() => {
+                    setDate(isSessionActive && session ? session.business_date : todayString());
                     setViewMode('live');
-                    setDate(todayBusinessDate ?? businessDateFromNowLocal(BUSINESS_DAY_START_HOUR));
                   }}
                   className="rounded-lg px-3 py-2 text-sm font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
                 >
@@ -773,7 +819,12 @@ export default function AdminPage() {
                       : 'bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50'
                   }`}
                 >
-                  {isSessionActive ? '営業終了' : '営業開始'}
+                  {isSessionUpdating ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                      処理中...
+                    </span>
+                  ) : isSessionActive ? '営業終了' : '営業開始'}
                 </button>
               )}
             </div>
@@ -801,7 +852,7 @@ export default function AdminPage() {
                   onChange={() => {
                     const next = !autoRefreshEnabled;
                     setAutoRefreshEnabled(next);
-                    if (next) refreshVisits();
+                    if (next) refreshVisits({ showSpinner: true });
                   }}
                   disabled={sessionExpired || isHistoryMode}
                   className="h-4 w-4"
@@ -819,42 +870,38 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Date Navigation */}
-        <div className="bg-white border-b border-slate-200 px-4 py-3">
-          <div className="flex items-center gap-1 justify-center">
-            <button
-              onClick={() => setDate(shiftDate(date, -1))}
-              disabled={isSessionActive && !isHistoryMode}
-              className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 text-xs px-2 py-1.5 rounded-l-lg transition"
-            >
-              前日
-            </button>
-            <button
-              onClick={() => setDate(todayBusinessDate ?? businessDateFromNowLocal(BUSINESS_DAY_START_HOUR))}
-              disabled={
-                (isSessionActive && !isHistoryMode) ||
-                date === (todayBusinessDate ?? businessDateFromNowLocal(BUSINESS_DAY_START_HOUR))
-              }
-              className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 text-xs px-2 py-1.5 transition"
-            >
-              本日
-            </button>
-            <button
-              onClick={() => setDate(shiftDate(date, 1))}
-              disabled={isSessionActive && !isHistoryMode}
-              className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 text-xs px-2 py-1.5 rounded-r-lg transition"
-            >
-              翌日
-            </button>
-            <input
-              type="date"
-              value={date}
-              disabled={isSessionActive && !isHistoryMode}
-              onChange={(e: { target: { value: string } }) => setDate(e.target.value)}
-              className="bg-white text-slate-900 border border-slate-300 rounded-lg px-3 py-1.5 text-sm ml-2 focus:outline-none focus:ring-2 focus:ring-primary-600 disabled:opacity-40 disabled:cursor-not-allowed"
-            />
+        {/* Date Navigation - 履歴モードの時だけ表示 */}
+        {isHistoryMode && (
+          <div className="bg-white border-b border-slate-200 px-4 py-3">
+            <div className="flex items-center gap-1 justify-center">
+              <button
+                onClick={() => setDate(shiftDate(date, -1))}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs px-2 py-1.5 rounded-l-lg transition"
+              >
+                前日
+              </button>
+              <button
+                onClick={() => setDate(todayBusinessDate ?? todayString())}
+                disabled={date === (todayBusinessDate ?? todayString())}
+                className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 text-xs px-2 py-1.5 transition"
+              >
+                本日
+              </button>
+              <button
+                onClick={() => setDate(shiftDate(date, 1))}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs px-2 py-1.5 rounded-r-lg transition"
+              >
+                翌日
+              </button>
+              <input
+                type="date"
+                value={date}
+                onChange={(e: { target: { value: string } }) => setDate(e.target.value)}
+                className="bg-white text-slate-900 border border-slate-300 rounded-lg px-3 py-1.5 text-sm ml-2 focus:outline-none focus:ring-2 focus:ring-primary-600"
+              />
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Column Jump Buttons */}
         <div className="bg-white border-b border-slate-200 px-2 py-2 sticky top-[57px] z-10">
@@ -919,6 +966,7 @@ export default function AdminPage() {
                       key={visit.id}
                       visit={visit}
                       readOnly={isHistoryMode}
+                      visitLoading={visitActionLoading[visit.id] ?? null}
                       onStatusChange={handleUpdateStatus}
                       onServeOrder={handleServeOrder}
                       onCancelOrder={handleCancelOrder}
@@ -934,22 +982,44 @@ export default function AdminPage() {
         </div>
 
         {sessionAction && (
-          <ModalPortal>
+          <ModalPortal onOverlayClick={isSessionUpdating ? undefined : () => setSessionAction(null)}>
             <div className="bg-white rounded-lg p-5 w-full max-w-sm mx-4 shadow-xl">
               {sessionAction === 'start' ? (
-                <>
-                  <h3 className="text-sm font-bold text-slate-900 mb-3">営業を開始しますか？</h3>
-                  <p className="text-xs text-slate-500 mb-4">
-                    この時刻から営業日が開始され、以降の注文は今回の営業日に紐づきます。
-                  </p>
-                  <button
-                    onClick={() => handleSessionAction('start')}
-                    disabled={isSessionUpdating}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-2 rounded transition mb-2 disabled:opacity-50"
-                  >
-                    営業を開始する
-                  </button>
-                </>
+                (() => {
+                  const now = new Date();
+                  const nowStr = now.toLocaleString('ja-JP', {
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit',
+                  });
+                  const bdate = todayString();
+                  return (
+                    <>
+                      <h3 className="text-sm font-bold text-slate-900 mb-3">営業を開始しますか？</h3>
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-4">
+                        <p className="text-xs text-slate-500 mb-1">現在日時</p>
+                        <p className="text-sm font-semibold text-slate-900 mb-2">{nowStr}</p>
+                        <p className="text-xs text-slate-500 mb-1">開始される営業日</p>
+                        <p className="text-sm font-semibold text-emerald-700">{bdate}</p>
+                      </div>
+                      <p className="text-xs text-slate-500 mb-4">
+                        この日時を基準として、営業日 {bdate} の営業を開始します。
+                      </p>
+                      <button
+                        onClick={() => handleSessionAction('start')}
+                        disabled={isSessionUpdating}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-2 rounded transition mb-2 disabled:opacity-50"
+                      >
+                        {isSessionUpdating ? (
+                          <span className="inline-flex items-center justify-center gap-2">
+                            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                            処理中...
+                          </span>
+                        ) : '営業を開始する'}
+                      </button>
+                    </>
+                  );
+                })()
+
               ) : (
                 <>
                   <h3 className="text-sm font-bold text-slate-900 mb-3">営業を終了しますか？</h3>
@@ -961,7 +1031,12 @@ export default function AdminPage() {
                     disabled={isSessionUpdating}
                     className="w-full bg-red-600 hover:bg-red-700 text-white text-xs font-semibold py-2 rounded transition mb-2 disabled:opacity-50"
                   >
-                    営業を終了する
+                    {isSessionUpdating ? (
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                        処理中...
+                      </span>
+                    ) : '営業を終了する'}
                   </button>
                 </>
               )}
@@ -985,18 +1060,32 @@ export default function AdminPage() {
 function VisitCard({
   visit,
   readOnly,
+  visitLoading,
   onStatusChange,
   onServeOrder,
   onCancelOrder,
 }: {
   visit: AdminVisit;
   readOnly: boolean;
-  onStatusChange: (visitId: number, status: VisitStatus) => void | Promise<void>;
-  onServeOrder: (orderId: number) => void | Promise<void>;
-  onCancelOrder: (orderId: number) => void | Promise<void>;
+  visitLoading: string | null;
+  onStatusChange: (visitId: number, status: VisitStatus) => Promise<void>;
+  onServeOrder: (orderId: number) => Promise<void>;
+  onCancelOrder: (orderId: number) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ type: 'serve' | 'cancel' | 'reopen'; orderId?: number } | null>(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+
+  // ESC to close confirmation modal (disabled during processing)
+  useEffect(() => {
+    if (!confirmAction) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !confirmLoading) setConfirmAction(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [confirmAction, confirmLoading]);
+
   // UI policy: hide "seated" from admin UI completely.
   // If a visit is seated, treat it as "serving" for display & actions.
   const uiStatus: VisitStatus = visit.status === 'seated' ? 'serving' : visit.status;
@@ -1143,21 +1232,27 @@ function VisitCard({
                   onStatusChange(visit.id, prev);
                 }
               }}
-              className={`w-full text-sm md:text-xs min-h-[44px] md:min-h-0 py-2 md:py-1.5 px-2 rounded-lg md:rounded transition ${
+              disabled={!!visitLoading}
+              className={`w-full text-sm md:text-xs min-h-[44px] md:min-h-0 py-2 md:py-1.5 px-2 rounded-lg md:rounded transition disabled:opacity-50 ${
                 isDone
                   ? 'bg-red-600 hover:bg-red-700 text-white'
                   : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
               }`}
             >
-              {PREV_LABEL[uiStatus]}
+              {visitLoading ? (
+                <span className={`inline-block h-4 w-4 animate-spin rounded-full border-2 ${isDone ? 'border-white/40 border-t-white' : 'border-slate-400/40 border-t-slate-400'}`} />
+              ) : PREV_LABEL[uiStatus]}
             </button>
           )}
           {next && (
             <button
               onClick={() => onStatusChange(visit.id, next)}
-              className="w-full bg-primary-600 hover:bg-primary-700 text-white text-sm md:text-xs font-semibold min-h-[48px] md:min-h-0 py-3 md:py-1.5 px-2 rounded-lg md:rounded transition"
+              disabled={!!visitLoading}
+              className="w-full bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-sm md:text-xs font-semibold min-h-[48px] md:min-h-0 py-3 md:py-1.5 px-2 rounded-lg md:rounded transition"
             >
-              {NEXT_LABEL[uiStatus]}
+              {visitLoading ? (
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+              ) : NEXT_LABEL[uiStatus]}
             </button>
           )}
         </div>
@@ -1165,7 +1260,7 @@ function VisitCard({
 
       {/* Confirmation Modal */}
       {confirmAction && !readOnly && (
-        <ModalPortal>
+        <ModalPortal onOverlayClick={confirmLoading ? undefined : () => setConfirmAction(null)}>
           <div className="bg-white rounded-lg p-5 w-full max-w-xs mx-4 shadow-xl">
             {confirmAction.type === 'reopen' ? (
               <>
@@ -1174,13 +1269,17 @@ function VisitCard({
                   会計済み（完了）の伝票です。提供中に戻すと、会計前の状態に戻ります。よろしいですか？
                 </p>
                 <button
-                  onClick={() => {
-                    onStatusChange(visit.id, 'checkout');
-                    setConfirmAction(null);
+                  onClick={async () => {
+                    setConfirmLoading(true);
+                    try { await onStatusChange(visit.id, 'checkout'); }
+                    finally { setConfirmLoading(false); setConfirmAction(null); }
                   }}
-                  className="w-full bg-red-600 hover:bg-red-700 text-white text-xs font-semibold py-2 rounded transition mb-2"
+                  disabled={confirmLoading}
+                  className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold py-2 rounded transition mb-2"
                 >
-                  会計を取り消す
+                  {confirmLoading ? (
+                    <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  ) : '会計を取り消す'}
                 </button>
               </>
             ) : (
@@ -1195,27 +1294,36 @@ function VisitCard({
                   }
                 </p>
                 <button
-                  onClick={() => {
-                    if (confirmAction.type === 'serve') {
-                      onServeOrder(confirmAction.orderId!);
-                    } else {
-                      onCancelOrder(confirmAction.orderId!);
+                  onClick={async () => {
+                    setConfirmLoading(true);
+                    try {
+                      if (confirmAction.type === 'serve') {
+                        await onServeOrder(confirmAction.orderId!);
+                      } else {
+                        await onCancelOrder(confirmAction.orderId!);
+                      }
+                    } finally {
+                      setConfirmLoading(false);
+                      setConfirmAction(null);
                     }
-                    setConfirmAction(null);
                   }}
-                  className={`w-full text-white text-xs font-semibold py-2 rounded transition mb-2 ${
+                  disabled={confirmLoading}
+                  className={`w-full text-white text-xs font-semibold py-2 rounded transition mb-2 disabled:opacity-50 ${
                     confirmAction.type === 'serve'
                       ? 'bg-green-600 hover:bg-green-700'
                       : 'bg-red-600 hover:bg-red-700'
                   }`}
                 >
-                  {confirmAction.type === 'serve' ? '提供済にする' : '取り消す'}
+                  {confirmLoading ? (
+                    <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  ) : confirmAction.type === 'serve' ? '提供済にする' : '取り消す'}
                 </button>
               </>
             )}
             <button
               onClick={() => setConfirmAction(null)}
-              className="w-full text-slate-500 hover:text-slate-900 text-xs py-1.5 transition"
+              disabled={confirmLoading}
+              className="w-full text-slate-500 hover:text-slate-900 text-xs py-1.5 transition disabled:opacity-50"
             >
               キャンセル
             </button>

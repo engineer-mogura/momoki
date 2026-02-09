@@ -8,7 +8,6 @@ use App\Models\Store;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class BusinessSessionController extends Controller
@@ -127,7 +126,6 @@ class BusinessSessionController extends Controller
         $storeId = $resolved;
 
         $tz = config('services.business_day.timezone', 'Asia/Tokyo');
-        $businessStart = config('services.business_day.start', '21:00');
 
         $open = BusinessSession::where('store_id', $storeId)
             ->whereNull('ended_at')
@@ -139,12 +137,8 @@ class BusinessSessionController extends Controller
             ]);
         }
 
-        $now = now($tz);
-        $todayStart = Carbon::parse($now->toDateString() . ' ' . $businessStart, $tz);
-        $businessDate = $now->lessThan($todayStart) ? $now->copy()->subDay()->toDateString() : $now->toDateString();
-
         return response()->json([
-            'business_date' => $businessDate,
+            'business_date' => now($tz)->toDateString(),
         ]);
     }
 
