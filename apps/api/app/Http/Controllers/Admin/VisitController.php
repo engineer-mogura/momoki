@@ -17,10 +17,35 @@ class VisitController extends Controller
         $tz = config('services.business_day.timezone', 'Asia/Tokyo');
         $businessStart = config('services.business_day.start', '21:00');
         $date = $request->input('date', now($tz)->toDateString());
+        $mode = (string) $request->input('mode', ''); // 'live' | 'history' | ''
+        $useLegacyRange = (bool) $request->boolean('legacy', false);
         $openSession = BusinessSession::where('store_id', $storeId)
             ->whereNull('ended_at')
             ->first();
         $session = null;
+
+        // Mode: live
+        // - Show ONLY open session if it exists
+        // - If not open, show nothing (hide ended sessions in live view)
+        if ($mode === 'live') {
+            if (!$openSession) {
+                return response()->json([
+                    'visits' => [],
+                    'session' => null,
+                    'date' => $date,
+                ]);
+            }
+
+            $visits = Visit::with(['user', 'orders.orderItems'])
+                ->where('business_session_id', $openSession->id)
+                ->orderBy('checked_in_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'visits' => $visits->map(fn (Visit $visit) => $this->formatVisit($visit)),
+                'session' => $this->formatSession($openSession),
+            ]);
+        }
 
         // Allow "history by business date" even while an open session exists.
         // - If requested date matches open session business_date => show open session
@@ -47,6 +72,17 @@ class VisitController extends Controller
         if ($session) {
             $query->where('business_session_id', $session->id);
         } else {
+            // Mode: history
+            // - If no session exists for the date, prefer showing empty (avoid confusing legacy BUSINESS_DAY_START overlap)
+            // - Legacy range fallback can be enabled explicitly via ?legacy=1
+            if ($mode === 'history' && !$useLegacyRange) {
+                return response()->json([
+                    'visits' => [],
+                    'session' => null,
+                    'date' => $date,
+                ]);
+            }
+
             // Business-day range: e.g. 2026-02-07 21:00:00 ~ 2026-02-08 20:59:59 (JST)
             $dayStart = Carbon::parse("{$date} {$businessStart}", $tz);
             $dayEnd = $dayStart->copy()->addDay()->subSecond();

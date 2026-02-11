@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { Order } from '@/types';
@@ -45,27 +45,29 @@ export default function OrdersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchOrders = useCallback(async () => {
+    if (!user) {
+      setIsLoading(false);
+      return;
+    }
+
+    setError(null);
+    setIsLoading(true);
+    try {
+      const response = await api.get<{ bill: Bill | null }>('/api/orders');
+      setBill(response.bill);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '注文履歴の取得に失敗しました');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user]);
+
   useEffect(() => {
-    const fetchOrders = async () => {
-      if (!user) {
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        const response = await api.get<{ bill: Bill | null }>('/api/orders');
-        setBill(response.bill);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '注文履歴の取得に失敗しました');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     if (!isAuthLoading) {
       fetchOrders();
     }
-  }, [user, isAuthLoading]);
+  }, [fetchOrders, isAuthLoading]);
 
   if (isAuthLoading || isLoading) {
     return (
@@ -101,7 +103,13 @@ export default function OrdersPage() {
               ← ホームへ戻る
             </Link>
             <h1 className="text-xl font-bold">注文状況</h1>
-            <div className="w-20"></div>
+            <button
+              onClick={fetchOrders}
+              disabled={isLoading}
+              className="inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-50 transition w-20"
+            >
+              {isLoading ? '読込中' : '再読み込み'}
+            </button>
           </div>
         </div>
       </header>

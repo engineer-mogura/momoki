@@ -382,7 +382,10 @@ export default function AdminPage() {
 
       try {
         const response = await api.get<VisitsResponse>('/api/admin/visits', {
-          params: { date: dateRef.current },
+          params: {
+            date: dateRef.current,
+            mode: isHistoryMode ? 'history' : 'live',
+          },
         });
         setVisits(response.visits);
         setSession(response.session ?? null);
@@ -398,7 +401,7 @@ export default function AdminPage() {
         if (opts?.showSpinner) setIsRefreshing(false);
       }
     },
-    [user?.is_admin, sessionExpired, handleUnauthenticated, isDateReady, isUnauthenticatedError]
+    [user?.is_admin, sessionExpired, handleUnauthenticated, isDateReady, isUnauthenticatedError, isHistoryMode]
   );
 
   // Initial fetch once (auto-refresh OFF is kept)
@@ -769,7 +772,13 @@ export default function AdminPage() {
                     営業日: {date}
                     {session?.started_at ? ` / 開始: ${formatSessionStartedAt(session.started_at)}` : ''}
                   </p>
-                  <p className="text-base md:text-xs leading-relaxed md:leading-normal text-slate-500">履歴閲覧中（操作はできません）</p>
+                  {session ? (
+                    <p className="text-base md:text-xs leading-relaxed md:leading-normal text-slate-500">履歴閲覧中（操作はできません）</p>
+                  ) : (
+                    <p className="text-base md:text-xs leading-relaxed md:leading-normal text-amber-700">
+                      この日の営業セッションはありません。
+                    </p>
+                  )}
                 </>
               ) : isSessionActive ? (
                 <>
@@ -801,7 +810,6 @@ export default function AdminPage() {
                 <button
                   onClick={() => {
                     setViewMode('history');
-                    refreshVisits({ showSpinner: true });
                   }}
                   className="rounded-lg px-3 py-2 text-sm font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
                 >
