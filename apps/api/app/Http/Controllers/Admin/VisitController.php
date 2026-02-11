@@ -83,7 +83,21 @@ class VisitController extends Controller
             'status' => 'required|in:' . implode(',', Visit::STATUSES),
         ]);
 
-        $visit->update(['status' => $request->status]);
+        $newStatus = (string) $request->status;
+
+        // Keep checked_out_at consistent with status transitions:
+        // - done => set checked_out_at if not set
+        // - moving away from done => clear checked_out_at (reopen)
+        $updates = ['status' => $newStatus];
+        if ($newStatus === Visit::STATUS_DONE) {
+            if (is_null($visit->checked_out_at)) {
+                $updates['checked_out_at'] = now();
+            }
+        } elseif ($visit->status === Visit::STATUS_DONE) {
+            $updates['checked_out_at'] = null;
+        }
+
+        $visit->update($updates);
         $visit->load(['user', 'orders.orderItems']);
 
         return response()->json([

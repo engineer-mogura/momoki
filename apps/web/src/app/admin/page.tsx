@@ -1021,24 +1021,40 @@ export default function AdminPage() {
                 })()
 
               ) : (
-                <>
-                  <h3 className="text-sm font-bold text-slate-900 mb-3">営業を終了しますか？</h3>
-                  <p className="text-xs text-slate-500 mb-4">
-                    営業を終了すると、以降の注文は次回営業日に紐づきます。よろしいですか？
-                  </p>
-                  <button
-                    onClick={() => handleSessionAction('end')}
-                    disabled={isSessionUpdating}
-                    className="w-full bg-red-600 hover:bg-red-700 text-white text-xs font-semibold py-2 rounded transition mb-2 disabled:opacity-50"
-                  >
-                    {isSessionUpdating ? (
-                      <span className="inline-flex items-center justify-center gap-2">
-                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                        処理中...
-                      </span>
-                    ) : '営業を終了する'}
-                  </button>
-                </>
+                (() => {
+                  const hasActiveVisits = visits.some(
+                    (v) => v.status === 'serving' || v.status === 'checkout' || v.status === 'seated'
+                  );
+                  return (
+                    <>
+                      <h3 className="text-sm font-bold text-slate-900 mb-3">営業を終了しますか？</h3>
+                      {hasActiveVisits ? (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+                          <p className="text-sm font-semibold text-amber-800 mb-1">未処理の伝票があります</p>
+                          <p className="text-xs text-amber-700">
+                            提供中または会計中の伝票が残っているため、営業終了できません。先に会計まで進めてください。
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500 mb-4">
+                          営業を終了すると、以降の注文は次回営業日に紐づきます。よろしいですか？
+                        </p>
+                      )}
+                      <button
+                        onClick={() => handleSessionAction('end')}
+                        disabled={isSessionUpdating || hasActiveVisits}
+                        className="w-full bg-red-600 hover:bg-red-700 text-white text-xs font-semibold py-2 rounded transition mb-2 disabled:opacity-50"
+                      >
+                        {isSessionUpdating ? (
+                          <span className="inline-flex items-center justify-center gap-2">
+                            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                            処理中...
+                          </span>
+                        ) : '営業を終了する'}
+                      </button>
+                    </>
+                  );
+                })()
               )}
               <button
                 onClick={() => setSessionAction(null)}
@@ -1138,7 +1154,7 @@ function VisitCard({
       {/* Time */}
       {visit.checked_in_at && (
         <p className="text-sm md:text-xs text-slate-400 mb-2">
-          入店 {elapsedMinutes(visit.checked_in_at)}
+          入店 {new Date(visit.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
         </p>
       )}
 

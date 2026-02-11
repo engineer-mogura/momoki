@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\BusinessSession;
 use App\Models\Store;
+use App\Models\Visit;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -50,31 +51,41 @@ class BusinessSessionController extends Controller
         }
 
         $tz = config('services.business_day.timezone', 'Asia/Tokyo');
+        $today = now($tz)->toDateString();
 
         try {
-            $session = DB::transaction(function () use ($request, $storeId, $tz) {
+            $session = DB::transaction(function () use ($request, $storeId, $today) {
+                // 同一営業日のセッションがあればそれを使う（冪等）
                 $existing = BusinessSession::where('store_id', $storeId)
-                    ->whereNull('ended_at')
+                    ->where('business_date', $today)
                     ->lockForUpdate()
                     ->first();
 
                 if ($existing) {
+                    // 終了済みなら再開する
+                    if ($existing->ended_at !== null) {
+                        $existing->update(['ended_at' => null]);
+                    }
                     return $existing;
                 }
 
                 return BusinessSession::create([
                     'store_id' => $storeId,
-                    'business_date' => now($tz)->toDateString(),
+                    'business_date' => $today,
                     'started_at' => now(),
                     'created_by' => $request->user()?->id,
                 ]);
             });
         } catch (QueryException $e) {
-            // PostgreSQL unique_violation (partial unique index on open sessions)
+            // PostgreSQL unique_violation (store_id + business_date)
             if ($e->getCode() === '23505') {
                 $session = BusinessSession::where('store_id', $storeId)
-                    ->whereNull('ended_at')
+                    ->where('business_date', $today)
                     ->first();
+                // 終了済みなら再開する
+                if ($session && $session->ended_at !== null) {
+                    $session->update(['ended_at' => null]);
+                }
             } else {
                 throw $e;
             }
@@ -104,7 +115,33 @@ class BusinessSessionController extends Controller
             ], 409);
         }
 
-        $session->update(['ended_at' => now()]);
+        // 未処理の visit があれば終了を拒否
+        $activeVisitCount = Visit::where('business_session_id', $session->id)
+            ->whereNull('checked_out_at')
+            ->whereIn('status', ['serving', 'checkout', 'seated'])
+            ->count();
+
+        if ($activeVisitCount > 0) {
+            return response()->json([
+                'error' => 'HAS_ACTIVE_VISITS',
+                'message' => '提供中または会計中の伝票が残っているため、営業終了できません。先に会計まで進めてください。',
+            ], 409);
+        }
+
+        $endedAt = now();
+
+        DB::transaction(function () use ($session, $endedAt) {
+            // Close business session
+            $session->update(['ended_at' => $endedAt]);
+
+            // Auto checkout: close all active visits in this session
+            Visit::query()
+                ->where('business_session_id', $session->id)
+                ->whereNull('checked_out_at')
+                ->update([
+                    'checked_out_at' => $endedAt,
+                ]);
+        });
 
         return response()->json([
             'message' => '営業を終了しました',

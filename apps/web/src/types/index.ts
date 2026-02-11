@@ -60,10 +60,12 @@ export interface OrderItem {
 
 export interface Order {
   id: number;
-  status: 'preparing' | 'served' | 'paid' | 'cancelled';
+  status: 'new' | 'preparing' | 'served' | 'paid' | 'cancelled';
   total_amount: number;
   notes: string | null;
   created_at: string;
+  display_order_no?: number;
+  is_paid?: boolean;
   store: {
     id: number;
     name: string;

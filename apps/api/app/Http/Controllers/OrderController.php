@@ -14,25 +14,100 @@ use Illuminate\Support\Facades\DB;
 class OrderController extends Controller
 {
     /**
-     * Get user's order history
+     * Get user's order history.
+     * 営業中セッションがあれば「現在の visit（未会計）」に紐づく注文を集約して返す。
+     * 営業中セッションが無い場合はフォールバックとして最新の visit に紐づく注文を集約して返す。
      */
     public function index(Request $request): JsonResponse
     {
-        $orders = $request->user()
-            ->orders()
-            ->with(['orderItems', 'store'])
-            ->orderBy('created_at', 'desc')
-            ->paginate(20);
+        $user = $request->user();
+        $storeId = (int) config('services.store.default_store_id');
 
-        return response()->json([
-            'orders' => $orders->map(fn($order) => $this->formatOrder($order)),
-            'pagination' => [
-                'current_page' => $orders->currentPage(),
-                'last_page' => $orders->lastPage(),
-                'per_page' => $orders->perPage(),
-                'total' => $orders->total(),
-            ],
-        ]);
+        // 営業中（open）セッションを探す
+        $currentSession = BusinessSession::where('store_id', $storeId)
+            ->whereNull('ended_at')
+            ->first();
+
+        $visit = $user->currentVisit();
+
+        // 営業中セッションがある場合は、そのセッションの visit 以外は表示しない
+        if ($currentSession && $visit && ((int) $visit->business_session_id !== (int) $currentSession->id)) {
+            $visit = null;
+        }
+
+        if (!$visit) {
+            // フォールバック: 最新の注文から visit を推定（営業終了後の確認用）
+            $latestOrder = $user->orders()
+                ->with(['visit'])
+                ->orderBy('created_at', 'desc')
+                ->first();
+            $visit = $latestOrder?->visit;
+        }
+
+        if (!$visit) {
+            return response()->json(['bill' => null]);
+        }
+
+        $ordersQuery = Order::query()
+            ->where('user_id', $user->id)
+            ->where('visit_id', $visit->id)
+            ->with(['orderItems', 'store', 'visit'])
+            ->orderBy('created_at', 'asc')
+            ->orderBy('id', 'asc');
+
+        if ($currentSession) {
+            $ordersQuery->where('business_session_id', $currentSession->id);
+        }
+
+        $orders = $ordersQuery->get();
+
+        if ($orders->isEmpty()) {
+            return response()->json(['bill' => null]);
+        }
+
+        $firstOrder = $orders->first();
+        $lastOrder = $orders->last();
+
+        // items を menu_item_id 単位で合算（取消は合算・合計から除外）
+        $itemsByMenuItemId = [];
+        $activeTotalAmount = 0;
+        foreach ($orders as $order) {
+            if ($order->status === Order::STATUS_CANCELLED) {
+                continue;
+            }
+
+            $activeTotalAmount += (int) $order->total_amount;
+            foreach ($order->orderItems as $item) {
+                $menuItemId = (int) $item->menu_item_id;
+                if (!array_key_exists($menuItemId, $itemsByMenuItemId)) {
+                    $itemsByMenuItemId[$menuItemId] = [
+                        'menu_item_id' => $menuItemId,
+                        'name' => $item->menu_item_name,
+                        'price' => (int) $item->price,
+                        'quantity' => 0,
+                        'subtotal' => 0,
+                    ];
+                }
+                $itemsByMenuItemId[$menuItemId]['quantity'] += (int) $item->quantity;
+                $itemsByMenuItemId[$menuItemId]['subtotal'] += (int) $item->subtotal;
+            }
+        }
+
+        $visitCheckedOutAt = $visit->checked_out_at;
+        $bill = [
+            'visit_id' => $visit->id,
+            'business_session_id' => $currentSession?->id ?? $firstOrder->business_session_id,
+            'created_at' => $firstOrder->created_at->toIso8601String(),
+            'last_ordered_at' => $lastOrder->created_at->toIso8601String(),
+            'is_paid' => (bool) $visitCheckedOutAt,
+            'checked_in_at' => $visit->checked_in_at?->toIso8601String(),
+            'checked_out_at' => $visitCheckedOutAt?->toIso8601String(),
+            'total_amount' => $activeTotalAmount,
+            'items' => array_values($itemsByMenuItemId),
+            'orders' => $orders->map(fn (Order $o) => $this->formatOrder($o))->values()->all(),
+        ];
+
+        return response()->json(['bill' => $bill]);
     }
 
     /**
@@ -206,12 +281,15 @@ class OrderController extends Controller
      */
     private function formatOrder(Order $order): array
     {
+        $isPaid = (bool) ($order->visit?->checked_out_at);
+
         return [
             'id' => $order->id,
             'status' => $order->status,
             'total_amount' => $order->total_amount,
             'notes' => $order->notes,
             'created_at' => $order->created_at->toIso8601String(),
+            'is_paid' => $isPaid,
             'store' => [
                 'id' => $order->store->id,
                 'name' => $order->store->name,
